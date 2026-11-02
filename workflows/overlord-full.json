@@ -1,0 +1,113 @@
+{
+  "name": "Overlord \u2014 S1\u2013S9 Full Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "overlord/incident",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "6ed23269-b834-568c-a6e1-ed62aeb50113",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "6ed23269-b834-568c-a6e1-ed62aeb50113"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8790/pipeline/run",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}"
+      },
+      "id": "1929462b-bcc5-5a96-9089-cd206fc7d0f3",
+      "name": "Run Overlord Core",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const payload = $json;\nconst summary = payload.summary || {};\nconst result = payload.result || {};\nconst stages = (result.events || []).map((event) => event.metadata && event.metadata.stage).filter(Boolean);\nreturn [{ json: {\n  incident_id: summary.incident_id,\n  stages_completed: [...new Set(stages)],\n  n_facts: summary.n_facts,\n  n_conclusions: summary.n_conclusions,\n  tier: summary.tier,\n  status: summary.status,\n  outcome: summary.outcome,\n  blocked_at: summary.blocked_at,\n  error: summary.error,\n  pairing_balanced: summary.pairing_balanced,\n  decision_id: result.decision ? result.decision.decision_id : null\n} }];"
+      },
+      "id": "965c4b2a-9926-5eaf-93ca-729f5b122ad2",
+      "name": "Stage Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "30eeecca-1577-59c7-a86c-f8128c73cca5",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Run Overlord Core",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Overlord Core": {
+      "main": [
+        [
+          {
+            "node": "Stage Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage Summary": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

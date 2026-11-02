@@ -1,0 +1,164 @@
+{
+  "name": "Overlord \u2014 Gate Console",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "overlord/gate",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "3186f886-b110-5b83-98f3-bb6d2fe44e35",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "3186f886-b110-5b83-98f3-bb6d2fe44e35"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const allowed = [\"/health\", \"/schemas\", \"/sanitize\", \"/gates/min-support\",\n  \"/gates/triangulation\", \"/gates/window-audit\", \"/gates/tier\", \"/gates/compress\",\n  \"/validate/conclusion\", \"/pipeline/stages\", \"/pipeline/run\"];\nconst body = $json.body || {};\nconst endpoint = body.endpoint || \"/health\";\nif (!allowed.includes(endpoint)) {\n  return [{ json: { error: \"endpoint_not_permitted\", endpoint, allowed } }];\n}\nreturn [{ json: { endpoint, payload: body.payload || {} } }];"
+      },
+      "id": "d2e56d3f-c3b2-56d5-8eb0-9ba959b47431",
+      "name": "Validate Gate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9e729bee-c87b-5dad-a2ba-97b0843d4009",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e1a7f86d-0c3b-537c-98cc-abf151dcfd42",
+      "name": "Endpoint Rejected",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"http://127.0.0.1:8790\" + $json.endpoint }}",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+      },
+      "id": "c2233dc6-42e3-50b9-9cc5-bc11b555d9a2",
+      "name": "Call Overlord Core",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "c17c67eb-b8df-563e-ad4a-e55280f279a2",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Gate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Gate Request": {
+      "main": [
+        [
+          {
+            "node": "Endpoint Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Endpoint Rejected": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call Overlord Core",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Overlord Core": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

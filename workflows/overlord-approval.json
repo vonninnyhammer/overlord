@@ -1,0 +1,164 @@
+{
+  "name": "Overlord \u2014 HITL Approve / Cancel",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "overlord/approve",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "663bba7c-3831-5c56-80bf-7db167776055",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "663bba7c-3831-5c56-80bf-7db167776055"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $json.body || {};\nconst id = String(body.decision_id || \"\");\nconst action = body.action === \"cancel\" ? \"cancel\" : \"approve\";\nif (!/^[0-9a-fA-F-]{36}$/.test(id)) {\n  return [{ json: { error: \"invalid_decision_id\", decision_id: id } }];\n}\nreturn [{ json: {\n  endpoint: \"/pipeline/\" + action + \"/\" + id,\n  payload: action === \"approve\" ? { authorization: body.authorization || null } : {}\n} }];"
+      },
+      "id": "e1d40a65-2f20-57bc-ac29-393debeec829",
+      "name": "Resolve Decision Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1d0a5fcd-2372-50b2-a7d9-0bd6d5323d9f",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b12deac2-b99b-5a23-8670-0d1d524b5cf9",
+      "name": "Invalid Decision",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"http://127.0.0.1:8790\" + $json.endpoint }}",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+      },
+      "id": "06a28c51-6b7a-5f9e-9a11-2086b418fff6",
+      "name": "Resume Decision",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "d69f7dc7-a02a-5181-b7d8-722c3e454fc8",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Resolve Decision Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Decision Action": {
+      "main": [
+        [
+          {
+            "node": "Invalid Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invalid Decision": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resume Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume Decision": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
