@@ -44,6 +44,23 @@ assumed, and whose higher-impact actions stop for a human.
 Gates available as standalone operations: minimum support, triangulation,
 window audit, tier assignment, and evidence compression.
 
+## Sensors
+
+Three adapters normalise vendor events into the same `Fact` shape: `wazuh`,
+`falco`, and `zeek`. Each produces a deterministic UUID derived from the source
+event, a size-capped base64 payload, permitted tags, and provenance.
+
+The pipeline uses its default sensor unless `auto_sensors=True`, in which case
+each telemetry item is routed by its `source` field:
+
+```python
+pipeline = OverlordPipeline(auto_sensors=True)
+pipeline.run_incident([{"source": "wazuh", "@timestamp": "...", "rule": {"id": "5711"}}])
+```
+
+Over HTTP, set `"auto_sensors": true` on `/pipeline/run`. Unknown or missing
+sources fall back to a conservative generic sensor.
+
 ## Quick start
 
 ```bash
@@ -87,7 +104,7 @@ curl -s http://127.0.0.1:8790/pipeline/stages
 | POST | `/gates/tier` | Assign a response tier. |
 | POST | `/gates/compress` | Compress evidence to a character budget. |
 | GET | `/pipeline/stages` | List stages. |
-| POST | `/pipeline/run` | Run the pipeline (optionally `stop_after`). |
+| POST | `/pipeline/run` | Run the pipeline (optionally `stop_after`, `auto_sensors`). |
 | GET | `/pipeline/pending` | List pending approvals. |
 | POST | `/pipeline/approve/{decision_id}` | Approve and resume. |
 | POST | `/pipeline/cancel/{decision_id}` | Cancel and roll back. |
@@ -129,8 +146,9 @@ you run the core elsewhere.
 ## Status
 
 The deterministic core, gates, pipeline, pending approvals, record store, API,
-tests, and n8n workflows are implemented. Sensor adapters are not included in
-this release; the built-in adapters are simulations used by the tests.
+sensor adapters (Wazuh, Falco, Zeek), tests, and n8n workflows are implemented.
+The analyst, enrichment, and executor stages ship with simulations and remain
+pluggable adapters.
 
 ## License
 

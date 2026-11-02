@@ -36,6 +36,7 @@ from .models import (
 )
 from .policy import EXECUTION_WINDOW_SECONDS, Tier
 from .sanitize import sanitize_telemetry
+from .sensors import sensor_factory
 from .store import OverlordStore
 
 STAGES: tuple[str, ...] = tuple(f"S{i}" for i in range(1, 10))
@@ -190,6 +191,7 @@ class OverlordPipeline:
     def __init__(
         self,
         sensor: Sensor | None = None,
+        auto_sensors: bool = False,
         enrichment: Enrichment | None = None,
         analyst: Analyst | None = None,
         executor: Executor | None = None,
@@ -200,7 +202,9 @@ class OverlordPipeline:
         requesting_agent: str = "hermes",
         store: OverlordStore | None = None,
     ) -> None:
-        self.sensor = sensor or DefaultSensor()
+        self._default_sensor = DefaultSensor()
+        self.sensor = sensor or self._default_sensor
+        self.auto_sensors = auto_sensors
         self.enrichment = enrichment or DefaultEnrichment()
         self.analyst = analyst or DefaultAnalyst()
         self.executor = executor or DefaultExecutor()
@@ -305,7 +309,10 @@ class OverlordPipeline:
     ) -> None:
         now = self._now()
         for raw in telemetry:
-            fact = self.sensor.normalize(raw, now)
+            sensor = self.sensor
+            if self.auto_sensors and sensor is self._default_sensor:
+                sensor = sensor_factory(str(raw.get("source", "")))
+            fact = sensor.normalize(raw, now)
             result.facts[str(fact.fact_id)] = fact
             self._persist("record_fact", fact.model_dump(mode="json"))
         self._emit(

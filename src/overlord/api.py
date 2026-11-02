@@ -22,7 +22,7 @@ from .pipeline import STAGES, OverlordPipeline, summarise_incident
 from .sanitize import sanitize_telemetry
 from .store import OllamaEmbedder, OverlordStore, QdrantIndex
 
-app = FastAPI(title="Overlord Deterministic Core", version="0.1.0")
+app = FastAPI(title="Overlord Deterministic Core", version="0.2.0")
 
 _STATE_DIR = Path(
     os.getenv("OVERLORD_STATE_DIR", str(Path.home() / ".local" / "state" / "overlord"))
@@ -89,6 +89,7 @@ class PipelineRequest(BaseModel):
     authorization: str | None = None
     model_context_window: int = 8192
     stop_after: str | None = None
+    auto_sensors: bool = False
 
 
 class ApprovalRequest(BaseModel):
@@ -176,7 +177,9 @@ def list_stages() -> dict[str, list[str]]:
 @app.post("/pipeline/run")
 def post_pipeline(request: PipelineRequest) -> dict[str, Any]:
     pipeline = OverlordPipeline(
-        model_context_window=request.model_context_window, store=_STORE
+        model_context_window=request.model_context_window,
+        auto_sensors=request.auto_sensors,
+        store=_STORE,
     )
     result = pipeline.run_incident(
         request.telemetry,
