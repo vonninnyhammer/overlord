@@ -61,6 +61,15 @@ pipeline.run_incident([{"source": "wazuh", "@timestamp": "...", "rule": {"id": "
 Over HTTP, set `"auto_sensors": true` on `/pipeline/run`. Unknown or missing
 sources fall back to a conservative generic sensor.
 
+## Threat-intelligence enrichment
+
+When `OVERLORD_INTEL_DB` points at the ledger written by the
+[threat-intel-feed](https://github.com/vonninnyhammer/threat-intel-feed)
+collector, enrichment attaches matching advisory context to each fact. Matching
+is by CVE, ATT&CK technique, IOC, and advisory text; results are returned under
+`enrichment[fact_id]["threat_intel"]`. The adapter is read-only and degrades to
+the default enrichment when the ledger is absent.
+
 ## Quick start
 
 ```bash
@@ -142,13 +151,14 @@ you run the core elsewhere.
 | `OVERLORD_PERSIST` | `0` | Set to `1` to enable the record store. |
 | `OVERLORD_QDRANT_URL` | `http://127.0.0.1:6350` | Qdrant endpoint when persisting. |
 | `OVERLORD_EMBED_MODEL` | `nomic-embed-text` | Ollama embedding model. |
+| `OVERLORD_INTEL_DB` | unset | Threat-intel SQLite ledger for enrichment. |
 
 ## Status
 
 The deterministic core, gates, pipeline, pending approvals, record store, API,
-sensor adapters (Wazuh, Falco, Zeek), tests, and n8n workflows are implemented.
-The analyst, enrichment, and executor stages ship with simulations and remain
-pluggable adapters.
+sensor adapters (Wazuh, Falco, Zeek), threat-intelligence enrichment, tests, and
+n8n workflows are implemented. The analyst and executor stages ship with
+simulations and remain pluggable adapters.
 
 ## License
 

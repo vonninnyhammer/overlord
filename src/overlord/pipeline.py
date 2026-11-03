@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,7 @@ from .gates import (
     evaluate_min_support,
     evaluate_triangulation,
 )
+from .intel import IntelEnrichment, IntelLedger
 from .models import (
     MAX_EVIDENCE_SUMMARY_CHARS,
     AuthorisedBy,
@@ -205,7 +207,7 @@ class OverlordPipeline:
         self._default_sensor = DefaultSensor()
         self.sensor = sensor or self._default_sensor
         self.auto_sensors = auto_sensors
-        self.enrichment = enrichment or DefaultEnrichment()
+        self.enrichment = enrichment or self._default_enrichment()
         self.analyst = analyst or DefaultAnalyst()
         self.executor = executor or DefaultExecutor()
         self.event_log = Path(event_log) if event_log else None
@@ -215,6 +217,13 @@ class OverlordPipeline:
         self.requesting_agent = requesting_agent
         self.store = store
         self._in_flight: dict[str, int] = {}
+
+    @staticmethod
+    def _default_enrichment() -> Enrichment:
+        intel_db = os.environ.get("OVERLORD_INTEL_DB")
+        if intel_db and Path(intel_db).exists():
+            return IntelEnrichment(IntelLedger(intel_db), DefaultEnrichment())
+        return DefaultEnrichment()
 
     def _persist(self, method: str, payload: dict[str, Any]) -> None:
         if self.store is None:
