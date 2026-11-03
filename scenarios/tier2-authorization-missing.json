@@ -1,0 +1,63 @@
+{
+  "description": "A medical workstation upgrades tier 1 to tier 2 and blocks without authorization.",
+  "expect": {
+    "blocked_at": "S7",
+    "decision_status": "pending",
+    "error": "authorization_required",
+    "n_conclusions": 3,
+    "outcome": null,
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7"
+    ],
+    "tier": 2
+  },
+  "hypotheses": [
+    "credential_access"
+  ],
+  "id": "tier2-authorization-missing",
+  "name": "Tier 2 requires written authorization",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": true,
+    "asset_class": "medical_workstation",
+    "requested_tier": 1
+  },
+  "techniques": [
+    "T1078"
+  ],
+  "telemetry": [
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 0 authentication",
+      "normalized_tags": [
+        "authentication"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 1 authentication",
+      "normalized_tags": [
+        "authentication"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 2 authentication",
+      "normalized_tags": [
+        "authentication"
+      ],
+      "source": "wazuh"
+    }
+  ]
+}

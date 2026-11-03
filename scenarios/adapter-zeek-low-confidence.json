@@ -1,0 +1,53 @@
+{
+  "description": "Zeek conn records carry 0.6 confidence, below the 0.7 floor, so S4 must block.",
+  "expect": {
+    "blocked_at": "S4",
+    "decision_status": null,
+    "error": "under_supported",
+    "n_conclusions": 0,
+    "outcome": null,
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4"
+    ],
+    "tier": null
+  },
+  "hypotheses": [],
+  "id": "adapter-zeek-low-confidence",
+  "name": "Zeek conn records fail min support",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": true,
+    "auto_sensors": true,
+    "requested_tier": 1
+  },
+  "techniques": [],
+  "telemetry": [
+    {
+      "_path": "conn",
+      "id.orig_h": "10.0.1.20",
+      "id.resp_h": "10.0.0.5",
+      "source": "zeek",
+      "ts": 1793664000.0,
+      "uid": "C0"
+    },
+    {
+      "_path": "conn",
+      "id.orig_h": "10.0.1.20",
+      "id.resp_h": "10.0.0.5",
+      "source": "zeek",
+      "ts": 1793664000.0,
+      "uid": "C1"
+    },
+    {
+      "_path": "conn",
+      "id.orig_h": "10.0.1.20",
+      "id.resp_h": "10.0.0.5",
+      "source": "zeek",
+      "ts": 1793664000.0,
+      "uid": "C2"
+    }
+  ]
+}

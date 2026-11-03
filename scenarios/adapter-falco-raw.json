@@ -1,0 +1,71 @@
+{
+  "description": "A critical Falco shell alert should become process creation and T1059.",
+  "expect": {
+    "blocked_at": null,
+    "decision_status": "applied",
+    "error": null,
+    "n_conclusions": 3,
+    "outcome": "success",
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7",
+      "S8",
+      "S9"
+    ],
+    "tier": 1
+  },
+  "hypotheses": [
+    "command_and_control"
+  ],
+  "id": "adapter-falco-raw",
+  "name": "Falco adapter normalizes a shell-spawn alert",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": true,
+    "auto_sensors": true,
+    "requested_tier": 1
+  },
+  "techniques": [
+    "T1059"
+  ],
+  "telemetry": [
+    {
+      "output": "shell spawned in container 0",
+      "output_fields": {
+        "container.id": "abc123",
+        "hostname": "host-42"
+      },
+      "priority": "Critical",
+      "rule": "Terminal shell in container",
+      "source": "falco",
+      "time": "2026-11-03T00:00:00+00:00"
+    },
+    {
+      "output": "shell spawned in container 1",
+      "output_fields": {
+        "container.id": "abc123",
+        "hostname": "host-42"
+      },
+      "priority": "Critical",
+      "rule": "Terminal shell in container",
+      "source": "falco",
+      "time": "2026-11-03T00:00:00+00:00"
+    },
+    {
+      "output": "shell spawned in container 2",
+      "output_fields": {
+        "container.id": "abc123",
+        "hostname": "host-42"
+      },
+      "priority": "Critical",
+      "rule": "Terminal shell in container",
+      "source": "falco",
+      "time": "2026-11-03T00:00:00+00:00"
+    }
+  ]
+}

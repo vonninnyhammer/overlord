@@ -1,0 +1,64 @@
+{
+  "description": "Network-connection telemetry should enrich to T1071.",
+  "expect": {
+    "blocked_at": null,
+    "decision_status": "applied",
+    "error": null,
+    "n_conclusions": 3,
+    "outcome": "success",
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7",
+      "S8",
+      "S9"
+    ],
+    "tier": 1
+  },
+  "hypotheses": [
+    "command_and_control"
+  ],
+  "id": "command-and-control-network",
+  "name": "Network connection maps to application-layer C2",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": true,
+    "requested_tier": 1
+  },
+  "techniques": [
+    "T1071"
+  ],
+  "telemetry": [
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 0 network_connection",
+      "normalized_tags": [
+        "network_connection"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 1 network_connection",
+      "normalized_tags": [
+        "network_connection"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 2 network_connection",
+      "normalized_tags": [
+        "network_connection"
+      ],
+      "source": "wazuh"
+    }
+  ]
+}

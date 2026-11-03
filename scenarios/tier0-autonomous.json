@@ -1,0 +1,64 @@
+{
+  "description": "A perimeter firewall IP permits tier 0 with no approval.",
+  "expect": {
+    "blocked_at": null,
+    "decision_status": "applied",
+    "error": null,
+    "n_conclusions": 3,
+    "outcome": "success",
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7",
+      "S8",
+      "S9"
+    ],
+    "tier": 0
+  },
+  "hypotheses": [
+    "command_and_control"
+  ],
+  "id": "tier0-autonomous",
+  "name": "Tier 0 executes autonomously on a perimeter IP",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "asset_class": "perimeter_firewall_ip",
+    "requested_tier": 0
+  },
+  "techniques": [
+    "T1071"
+  ],
+  "telemetry": [
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 0 network_connection",
+      "normalized_tags": [
+        "network_connection"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 1 network_connection",
+      "normalized_tags": [
+        "network_connection"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 2 network_connection",
+      "normalized_tags": [
+        "network_connection"
+      ],
+      "source": "wazuh"
+    }
+  ]
+}

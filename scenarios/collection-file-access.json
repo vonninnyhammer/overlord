@@ -1,0 +1,64 @@
+{
+  "description": "File-access telemetry should enrich to T1005 and meet the collection support threshold.",
+  "expect": {
+    "blocked_at": null,
+    "decision_status": "applied",
+    "error": null,
+    "n_conclusions": 3,
+    "outcome": "success",
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7",
+      "S8",
+      "S9"
+    ],
+    "tier": 1
+  },
+  "hypotheses": [
+    "collection"
+  ],
+  "id": "collection-file-access",
+  "name": "File access maps to collection",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": true,
+    "requested_tier": 1
+  },
+  "techniques": [
+    "T1005"
+  ],
+  "telemetry": [
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 0 file_access",
+      "normalized_tags": [
+        "file_access"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 1 file_access",
+      "normalized_tags": [
+        "file_access"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 2 file_access",
+      "normalized_tags": [
+        "file_access"
+      ],
+      "source": "wazuh"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "description": "Data-exfiltration telemetry should enrich to T1041.",
+  "expect": {
+    "blocked_at": null,
+    "decision_status": "applied",
+    "error": null,
+    "n_conclusions": 3,
+    "outcome": "success",
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7",
+      "S8",
+      "S9"
+    ],
+    "tier": 1
+  },
+  "hypotheses": [
+    "exfiltration"
+  ],
+  "id": "exfiltration",
+  "name": "Exfiltration telemetry maps to exfil over C2",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": true,
+    "requested_tier": 1
+  },
+  "techniques": [
+    "T1041"
+  ],
+  "telemetry": [
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 0 data_exfiltration",
+      "normalized_tags": [
+        "data_exfiltration"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 1 data_exfiltration",
+      "normalized_tags": [
+        "data_exfiltration"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 2 data_exfiltration",
+      "normalized_tags": [
+        "data_exfiltration"
+      ],
+      "source": "wazuh"
+    }
+  ]
+}

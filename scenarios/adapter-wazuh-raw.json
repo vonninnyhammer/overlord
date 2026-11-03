@@ -1,0 +1,84 @@
+{
+  "description": "Raw Wazuh rule 5711 should yield both T1078 and T1110 through the real adapter.",
+  "expect": {
+    "blocked_at": null,
+    "decision_status": "applied",
+    "error": null,
+    "n_conclusions": 3,
+    "outcome": "success",
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7",
+      "S8",
+      "S9"
+    ],
+    "tier": 1
+  },
+  "hypotheses": [
+    "credential_access"
+  ],
+  "id": "adapter-wazuh-raw",
+  "name": "Wazuh adapter normalizes a suspicious-login rule",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": true,
+    "auto_sensors": true,
+    "requested_tier": 1
+  },
+  "techniques": [
+    "T1078",
+    "T1110"
+  ],
+  "telemetry": [
+    {
+      "@timestamp": "2026-11-03T00:00:00+00:00",
+      "agent": {
+        "id": "001",
+        "name": "host-42"
+      },
+      "id": "wazuh-5711-0",
+      "level": 12,
+      "location": "/var/log/auth.log",
+      "rule": {
+        "description": "Multiple failed logins followed by success",
+        "id": "5711"
+      },
+      "source": "wazuh"
+    },
+    {
+      "@timestamp": "2026-11-03T00:00:00+00:00",
+      "agent": {
+        "id": "001",
+        "name": "host-42"
+      },
+      "id": "wazuh-5711-1",
+      "level": 12,
+      "location": "/var/log/auth.log",
+      "rule": {
+        "description": "Multiple failed logins followed by success",
+        "id": "5711"
+      },
+      "source": "wazuh"
+    },
+    {
+      "@timestamp": "2026-11-03T00:00:00+00:00",
+      "agent": {
+        "id": "001",
+        "name": "host-42"
+      },
+      "id": "wazuh-5711-2",
+      "level": 12,
+      "location": "/var/log/auth.log",
+      "rule": {
+        "description": "Multiple failed logins followed by success",
+        "id": "5711"
+      },
+      "source": "wazuh"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "description": "Evidence plus UUID overhead must exceed a 32-token window and block at S4.",
+  "expect": {
+    "blocked_at": "S4",
+    "decision_status": null,
+    "error": "context_exceeded",
+    "n_conclusions": 0,
+    "outcome": null,
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4"
+    ],
+    "tier": null
+  },
+  "hypotheses": [],
+  "id": "context-exceeded",
+  "name": "Tiny context window fails the audit",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": true,
+    "model_context_window": 32,
+    "requested_tier": 1
+  },
+  "techniques": [],
+  "telemetry": [
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 0 process_creation",
+      "normalized_tags": [
+        "process_creation"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 1 process_creation",
+      "normalized_tags": [
+        "process_creation"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 2 process_creation",
+      "normalized_tags": [
+        "process_creation"
+      ],
+      "source": "wazuh"
+    }
+  ]
+}

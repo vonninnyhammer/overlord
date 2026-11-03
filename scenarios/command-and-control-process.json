@@ -1,0 +1,64 @@
+{
+  "description": "Process-creation telemetry should enrich to T1059 and produce a C2 conclusion.",
+  "expect": {
+    "blocked_at": null,
+    "decision_status": "applied",
+    "error": null,
+    "n_conclusions": 3,
+    "outcome": "success",
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7",
+      "S8",
+      "S9"
+    ],
+    "tier": 1
+  },
+  "hypotheses": [
+    "command_and_control"
+  ],
+  "id": "command-and-control-process",
+  "name": "Process creation maps to command and control",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": true,
+    "requested_tier": 1
+  },
+  "techniques": [
+    "T1059"
+  ],
+  "telemetry": [
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 0 process_creation",
+      "normalized_tags": [
+        "process_creation"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 1 process_creation",
+      "normalized_tags": [
+        "process_creation"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 2 process_creation",
+      "normalized_tags": [
+        "process_creation"
+      ],
+      "source": "wazuh"
+    }
+  ]
+}

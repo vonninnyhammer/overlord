@@ -1,0 +1,62 @@
+{
+  "description": "An explicit rejection must stop before execution and mark the decision rolled back.",
+  "expect": {
+    "blocked_at": "S7",
+    "decision_status": "rolled_back",
+    "error": "cancelled",
+    "n_conclusions": 3,
+    "outcome": "escalated",
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7"
+    ],
+    "tier": 1
+  },
+  "hypotheses": [
+    "credential_access"
+  ],
+  "id": "tier1-cancelled",
+  "name": "Tier 1 cancellation rolls back",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": false,
+    "requested_tier": 1
+  },
+  "techniques": [
+    "T1078"
+  ],
+  "telemetry": [
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 0 authentication",
+      "normalized_tags": [
+        "authentication"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 1 authentication",
+      "normalized_tags": [
+        "authentication"
+      ],
+      "source": "wazuh"
+    },
+    {
+      "confidence": 0.9,
+      "host_id": "host-42",
+      "message": "alert 2 authentication",
+      "normalized_tags": [
+        "authentication"
+      ],
+      "source": "wazuh"
+    }
+  ]
+}

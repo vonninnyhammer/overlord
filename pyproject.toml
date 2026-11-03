@@ -1,10 +1,13 @@
 [project]
 name = "overlord"
-version = "0.3.0"
+version = "0.4.0"
 description = "Deterministic, policy-gated pipeline for defensive cyber operations"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
+
+[project.scripts]
+overlord-eval = "overlord.evaluation:main"
 
 [project.urls]
 Repository = "https://github.com/vonninnyhammer/overlord"

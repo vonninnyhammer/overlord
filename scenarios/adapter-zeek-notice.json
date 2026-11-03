@@ -1,0 +1,62 @@
+{
+  "description": "Zeek notices carry 0.8 confidence and map to process creation in this adapter.",
+  "expect": {
+    "blocked_at": null,
+    "decision_status": "applied",
+    "error": null,
+    "n_conclusions": 3,
+    "outcome": "success",
+    "stages": [
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "S6",
+      "S7",
+      "S8",
+      "S9"
+    ],
+    "tier": 1
+  },
+  "hypotheses": [
+    "command_and_control"
+  ],
+  "id": "adapter-zeek-notice",
+  "name": "Zeek notice maps to process creation",
+  "now": "2026-11-03T00:00:00+00:00",
+  "pipeline": {
+    "approve": true,
+    "auto_sensors": true,
+    "requested_tier": 1
+  },
+  "techniques": [
+    "T1059"
+  ],
+  "telemetry": [
+    {
+      "_path": "notice",
+      "id.orig_h": "10.0.1.20",
+      "id.resp_h": "10.0.0.5",
+      "source": "zeek",
+      "ts": 1793664000.0,
+      "uid": "C0"
+    },
+    {
+      "_path": "notice",
+      "id.orig_h": "10.0.1.20",
+      "id.resp_h": "10.0.0.5",
+      "source": "zeek",
+      "ts": 1793664000.0,
+      "uid": "C1"
+    },
+    {
+      "_path": "notice",
+      "id.orig_h": "10.0.1.20",
+      "id.resp_h": "10.0.0.5",
+      "source": "zeek",
+      "ts": 1793664000.0,
+      "uid": "C2"
+    }
+  ]
+}

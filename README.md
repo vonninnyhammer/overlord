@@ -78,6 +78,7 @@ python -m venv .venv
 pip install -e ".[dev]"
 
 pytest -q
+overlord-eval --no-write
 uvicorn overlord.api:app --host 127.0.0.1 --port 8790
 ```
 
@@ -98,6 +99,56 @@ curl -s -X POST http://127.0.0.1:8790/pipeline/run \
 
 curl -s http://127.0.0.1:8790/pipeline/stages
 ```
+
+## Evaluation harness
+
+`overlord-eval` replays labelled telemetry scenarios through the real pipeline
+and scores both detection quality and policy behaviour. Each scenario carries
+the expected ATT&CK techniques and hypotheses, the pipeline inputs, and the
+expected gate outcome. Runs use a fixed clock by default, so scores are
+deterministic and suitable for a regression gate.
+
+```bash
+overlord-eval                       # writes reports/eval.json and reports/eval.md
+overlord-eval --no-write            # summary only
+overlord-eval scenarios/credential-access-auth.json --no-write
+```
+
+A scenario is a small JSON document:
+
+```json
+{
+  "id": "credential-access-auth",
+  "name": "Authentication event maps to credential access",
+  "techniques": ["T1078"],
+  "hypotheses": ["credential_access"],
+  "pipeline": {"requested_tier": 1, "approve": true},
+  "telemetry": [{"source": "wazuh", "message": "...", "normalized_tags": ["authentication"], "confidence": 0.9}],
+  "expect": {
+    "blocked_at": null,
+    "error": null,
+    "tier": 1,
+    "decision_status": "applied",
+    "outcome": "success",
+    "n_conclusions": 3
+  }
+}
+```
+
+The report includes:
+
+- technique and hypothesis precision, recall, and F1;
+- detection pass rate (no missed or unexpected labels);
+- gate, tier, and decision accuracy;
+- per-technique coverage and per-scenario latency;
+- explicit failure reasons for every mismatched scenario.
+
+The command exits non-zero when any scenario fails or a configured threshold is
+missed (`--min-pass-rate`, `--min-technique-recall`,
+`--min-technique-precision`). `scenarios/` is generated: edit
+`tools/generate_scenarios.py` and re-run it rather than editing JSON by hand.
+The harness evaluates deterministic telemetry replay and policy gates; live
+adversary emulation in isolated VMs is a separate layer.
 
 ## API
 
@@ -156,9 +207,9 @@ you run the core elsewhere.
 ## Status
 
 The deterministic core, gates, pipeline, pending approvals, record store, API,
-sensor adapters (Wazuh, Falco, Zeek), threat-intelligence enrichment, tests, and
-n8n workflows are implemented. The analyst and executor stages ship with
-simulations and remain pluggable adapters.
+sensor adapters (Wazuh, Falco, Zeek), threat-intelligence enrichment, the
+evaluation harness, tests, and n8n workflows are implemented. The analyst and
+executor stages ship with simulations and remain pluggable adapters.
 
 ## License
 
