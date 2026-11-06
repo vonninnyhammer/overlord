@@ -24,14 +24,20 @@ assumed, and whose higher-impact actions stop for a human.
   approval within 60 seconds; unapproved ones are expired and recorded the next
   time the queue is read. Tier 2 needs a named authorizer.
 - **Evidence, not vibes.** A conclusion must clear a minimum-support threshold,
-  and a response needs at least three distinct conclusions. Identical replayed
-  events collapse into one fact. By default a response also needs facts from two
+  and a response needs at least three conclusions that agree on one hypothesis,
+  each reached from a different trigger fact (with the built-in analyst this
+  means three separate facts). Identical replayed events collapse into one fact. By default a response also needs facts from two
   different sensor types (`OVERLORD_MIN_INDEPENDENT_SOURCES`, default `2`; set `1`
   to allow a single sensor).
 - **Sanitised telemetry.** Addresses, hostnames, URLs, email addresses, usernames
   in paths, common secrets, and binary blobs are replaced in what the analyst
   receives. The original fact is kept for forensics. Redaction is pattern-based,
   so an unlabelled short hostname can still get through.
+- **Brakes.** At most three analyst requests per agent are open at once, across
+  all API requests. After five Tier 1 actions inside five minutes, Tier 1 is
+  frozen for fifteen minutes: new Tier 1 requests are raised to Tier 2 where the
+  asset allows it and refused where it doesn't, and parked Tier 1 approvals
+  return 409. The counters live in memory, so a restart resets them.
 - **Append-only trail.** Requests and replies are paired into events; the final
   decision is recorded with its provenance.
 
@@ -53,6 +59,10 @@ Gates available as standalone operations: minimum support, triangulation,
 window audit, tier assignment, and evidence compression.
 
 ## Sensors
+
+The generic sensor (used unless `auto_sensors` is on) takes tags from the caller,
+but derives the fact id from the event itself, caps confidence at 0.9, and sets
+the author; a caller cannot use made-up ids to make one event count several times.
 
 Three adapters normalise vendor events into the same `Fact` shape: `wazuh`,
 `falco`, and `zeek`. Each produces a deterministic UUID derived from the source

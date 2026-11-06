@@ -21,6 +21,7 @@ from .gates import (
 from .models import SCHEMAS, get_schema, validate_agent_output
 from .pending import PendingStore
 from .pipeline import STAGES, OverlordPipeline, summarise_incident
+from .runtime import RuntimeState
 from .sanitize import sanitize_telemetry
 from .store import OllamaEmbedder, OverlordStore, QdrantIndex
 
@@ -61,10 +62,11 @@ def _build_store() -> OverlordStore | None:
 
 
 _STORE = _build_store()
+_RUNTIME = RuntimeState()  # throttle and circuit breaker shared by all requests
 
 
 def _pipeline() -> OverlordPipeline:
-    return OverlordPipeline(store=_STORE)
+    return OverlordPipeline(store=_STORE, runtime=_RUNTIME)
 
 
 def _sweep_expired() -> list[str]:
@@ -225,6 +227,7 @@ def post_pipeline(request: PipelineRequest) -> dict[str, Any]:
         model_context_window=request.model_context_window,
         auto_sensors=request.auto_sensors,
         store=_STORE,
+        runtime=_RUNTIME,
     )
     try:
         result = pipeline.run_incident(
@@ -268,6 +271,9 @@ def approve_decision(
     if result.error in {"authorization_required", "authorization_invalid"}:
         _PENDING.restore(decision_id, parked)
         raise HTTPException(status_code=403, detail=result.error)
+    if result.error == "circuit_breaker_open":
+        _PENDING.restore(decision_id, parked)
+        raise HTTPException(status_code=409, detail=result.error)
     return {"summary": summarise_incident(result), "result": result.to_dict()}
 
 

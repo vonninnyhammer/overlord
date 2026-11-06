@@ -234,7 +234,7 @@ def test_analyst_failure_blocks_cleanly():
     result = pipeline.run_incident(events())
     assert result.blocked_at == "S4"
     assert result.error == "analyst_error"
-    assert pipeline._in_flight[pipeline.requesting_agent] == 0
+    assert pipeline.runtime.in_flight(pipeline.requesting_agent) == 0
 
 
 def test_executor_failure_is_recorded_not_lost():

@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -36,12 +36,14 @@ from .models import (
     Source,
     validate_agent_output,
 )
-from .policy import EXECUTION_WINDOW_SECONDS, HYPOTHESIS_MIN_TIER, Tier
+from .policy import ASSET_CLASS_POLICY, EXECUTION_WINDOW_SECONDS, HYPOTHESIS_MIN_TIER, Tier
+from .runtime import RuntimeState
 from .sanitize import sanitize_telemetry
 from .sensors import sensor_factory
 from .store import OverlordStore
 
 STAGES: tuple[str, ...] = tuple(f"S{i}" for i in range(1, 10))
+GENERIC_MAX_CONFIDENCE = 0.9
 
 # Highest-impact first, so the same facts always give the same hypothesis.
 TAG_PRIORITY: tuple[str, ...] = (
@@ -131,9 +133,10 @@ class DefaultSensor:
     def normalize(self, raw: Mapping[str, Any], now: datetime) -> Fact:
         text = str(raw.get("message", ""))
         payload = base64.b64encode(text.encode("utf-8", "replace")[:3000]).decode("ascii")
+        # The generic sensor accepts anything, so it does not let the caller choose the fact id
+        # (that would defeat duplicate collapsing), the author, or a confidence above 0.9.
         return Fact(
-            fact_id=raw.get("fact_id")
-            or uuid5(
+            fact_id=uuid5(
                 NAMESPACE_URL,
                 "default:"
                 + json.dumps(
@@ -151,13 +154,13 @@ class DefaultSensor:
             timestamp=now,
             raw_payload=payload,
             normalized_tags=list(raw.get("normalized_tags") or ["process_creation"]),
-            confidence=float(raw.get("confidence", 0.9)),
+            confidence=min(GENERIC_MAX_CONFIDENCE, float(raw.get("confidence", GENERIC_MAX_CONFIDENCE))),
             provenance=Provenance(
                 collector_id=str(raw.get("collector_id", "sensor-local")),
                 host_id=str(raw.get("host_id", "host-unknown")),
                 sensor_uid=str(raw.get("sensor_uid", "sensor-local")),
             ),
-            created_by=str(raw.get("created_by", "s1_ingest")),
+            created_by="s1_ingest",
         )
 
 
@@ -211,6 +214,7 @@ class IncidentResult:
     facts: dict[str, Fact] = field(default_factory=dict)
     enrichment: dict[str, dict[str, Any]] = field(default_factory=dict)
     conclusions: dict[str, ConclusionSubmission] = field(default_factory=dict)
+    triggers: dict[str, str] = field(default_factory=dict)  # conclusion_id -> trigger fact
     audits: dict[str, WindowAudit] = field(default_factory=dict)
     compressions: dict[str, CompressionResult] = field(default_factory=dict)
     tier: TierAssignment | None = None
@@ -262,6 +266,7 @@ class OverlordPipeline:
         authorizer: Authorizer | None = None,
         min_independent_sources: int | None = None,
         asset_inventory: Mapping[str, str] | None = None,
+        runtime: RuntimeState | None = None,
     ) -> None:
         self._default_sensor = DefaultSensor()
         self.sensor = sensor or self._default_sensor
@@ -284,7 +289,7 @@ class OverlordPipeline:
         self.asset_inventory = (
             asset_inventory if asset_inventory is not None else self._load_inventory()
         )
-        self._in_flight: dict[str, int] = {}
+        self.runtime = runtime or RuntimeState()
 
     @staticmethod
     def _default_enrichment() -> Enrichment:
@@ -317,7 +322,7 @@ class OverlordPipeline:
         return True
 
     def _release(self, agent: str) -> None:
-        self._in_flight[agent] = max(0, self._in_flight.get(agent, 1) - 1)
+        self.runtime.release(agent)
 
     def _now(self) -> datetime:
         return self.clock()
@@ -452,11 +457,11 @@ class OverlordPipeline:
 
     def _s3_dispatch(self, result: IncidentResult, trigger_fact_id: str) -> str:
         agent = self.requesting_agent
-        in_flight = self._in_flight.get(agent, 0)
-        if in_flight >= self.max_concurrent_requests:
+        taken = self.runtime.acquire(agent, self.max_concurrent_requests)
+        if taken is None:
             self._block(result, "S3", "throttled")
             return ""
-        self._in_flight[agent] = in_flight + 1
+        in_flight = taken - 1
         correlation = f"{result.incident_id}-{uuid4().hex[:8]}"
         self._emit(
             result,
@@ -566,6 +571,7 @@ class OverlordPipeline:
                 return
 
             result.conclusions[str(submission.conclusion_id)] = submission
+            result.triggers[str(submission.conclusion_id)] = trigger_fact_id
             self._persist("record_conclusion", submission.model_dump(mode="json"), result)
             self._emit(
                 result,
@@ -586,7 +592,16 @@ class OverlordPipeline:
 
     def _s5_justification(self, result: IncidentResult) -> None:
         justification = sorted(result.conclusions)
-        gate = evaluate_triangulation(justification)
+        # Triangulation counts conclusions that agree on one hypothesis and were each reached from
+        # a different trigger fact. Re-running the analyst on the same fact adds nothing, and
+        # conclusions that disagree do not corroborate each other.
+        lines: dict[str, set[str]] = {}
+        for cid, conclusion in result.conclusions.items():
+            lines.setdefault(conclusion.hypothesis.value, set()).add(result.triggers.get(cid, cid))
+        agreed_hypothesis, agreed = max(
+            lines.items(), key=lambda kv: (len(kv[1]), kv[0]), default=(None, set())
+        )
+        gate = evaluate_triangulation(sorted(agreed))
         if not gate.ok:
             self._emit(
                 result,
@@ -594,7 +609,7 @@ class OverlordPipeline:
                 "pipeline.stage",
                 EventStatus.FAILED,
                 body=gate.error,
-                metadata={"distinct_count": gate.distinct_count},
+                metadata={"distinct_count": gate.distinct_count, "hypothesis": agreed_hypothesis},
             )
             self._block(result, "S5", gate.error or "triangulation_failed")
             return
@@ -648,6 +663,19 @@ class OverlordPipeline:
         hypotheses = sorted({c.hypothesis.value for c in result.conclusions.values()})
         strictest = max(hypotheses, key=lambda h: (HYPOTHESIS_MIN_TIER.get(h, 0), h), default=None)
         assignment = assign_tier(requested_tier, asset_class, hypothesis=strictest)
+        if (
+            assignment.permitted
+            and assignment.resolved_tier == Tier.CANCELLABLE
+            and self.runtime.tier1_frozen(self._now())
+        ):
+            policy = ASSET_CLASS_POLICY.get(asset_class)
+            if policy is None or not policy.tier2_allowed:
+                result.tier = assignment
+                self._block(result, "S6", "circuit_breaker_open")
+                return
+            raised = assign_tier(Tier.HUMAN, asset_class)
+            assignment = replace(raised, requested_tier=assignment.requested_tier,
+                                 reason=f"circuit_breaker_tier1_frozen:{raised.reason}")
         result.tier = assignment
         if not assignment.permitted:
             self._emit(
@@ -840,6 +868,11 @@ class OverlordPipeline:
 
         if tier == Tier.CANCELLABLE and self.window_expired(parked):
             return self._expire(result)
+        if tier == Tier.CANCELLABLE and self.runtime.tier1_frozen(self._now()):
+            result.blocked_at = "S7"
+            result.error = "circuit_breaker_open"
+            self._emit(result, "S7", "pipeline.stage", EventStatus.BLOCKED, body="circuit_breaker_open")
+            return result
 
         self._emit(result, "S7", "pipeline.stage", EventStatus.APPLIED, body="resumed approval")
         self._s8_execute(result)
@@ -898,6 +931,17 @@ class OverlordPipeline:
         result.decision = decision.model_copy(
             update={"status": status, "outcome": outcome, "resolved_at": self._now()}
         )
+        if decision.action_tier == Tier.CANCELLABLE and status == DecisionStatus.APPLIED:
+            if self.runtime.record_tier1_run(self._now()):
+                frozen = self.runtime.frozen_until()
+                self._emit(
+                    result,
+                    "S8",
+                    "pipeline.stage",
+                    EventStatus.BLOCKED,
+                    body="circuit_breaker_tripped",
+                    metadata={"tier1_frozen_until": frozen.isoformat() if frozen else None},
+                )
         self._emit(
             result,
             "S8",
