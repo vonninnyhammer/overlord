@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import hmac
+import logging
 import os
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from .gates import (
@@ -28,6 +30,24 @@ _STATE_DIR = Path(
     os.getenv("OVERLORD_STATE_DIR", str(Path.home() / ".local" / "state" / "overlord"))
 )
 _PENDING = PendingStore(_STATE_DIR / "pending.json")
+log = logging.getLogger(__name__)
+PARKED_ERRORS = frozenset({"awaiting_approval", "authorization_required"})
+
+
+def require_token(authorization: str | None = Header(default=None)) -> None:
+    """Protect endpoints that act or expose records; fail closed without a token."""
+    expected = os.getenv("OVERLORD_API_TOKEN")
+    if not expected:
+        if os.getenv("OVERLORD_ALLOW_UNAUTHENTICATED") == "1":
+            return
+        raise HTTPException(status_code=503, detail="OVERLORD_API_TOKEN is not configured")
+    supplied = (authorization or "").removeprefix("Bearer ").strip()
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="invalid or missing API token")
+
+
+if not os.getenv("OVERLORD_API_TOKEN"):
+    log.warning("OVERLORD_API_TOKEN is unset: pipeline and store endpoints will refuse requests")
 
 
 def _build_store() -> OverlordStore | None:
@@ -174,75 +194,89 @@ def list_stages() -> dict[str, list[str]]:
     return {"stages": list(STAGES)}
 
 
-@app.post("/pipeline/run")
+@app.post("/pipeline/run", dependencies=[Depends(require_token)])
 def post_pipeline(request: PipelineRequest) -> dict[str, Any]:
+    # A caller must not approve its own request: approval is a separate step.
+    if (request.approve is True or request.authorization) and os.getenv(
+        "OVERLORD_ALLOW_INLINE_APPROVAL"
+    ) != "1":
+        raise HTTPException(
+            status_code=400,
+            detail="approve through /pipeline/approve/{decision_id}, not /pipeline/run",
+        )
     pipeline = OverlordPipeline(
         model_context_window=request.model_context_window,
         auto_sensors=request.auto_sensors,
         store=_STORE,
     )
-    result = pipeline.run_incident(
-        request.telemetry,
-        requested_tier=request.requested_tier,
-        asset_class=request.asset_class,
-        target_asset=request.target_asset,
-        approve=request.approve,
-        authorization=request.authorization,
-        stop_after=request.stop_after,
-    )
-    if result.blocked_at == "S7" and result.error == "awaiting_approval":
+    try:
+        result = pipeline.run_incident(
+            request.telemetry,
+            requested_tier=request.requested_tier,
+            asset_class=request.asset_class,
+            target_asset=request.target_asset,
+            approve=request.approve,
+            authorization=request.authorization,
+            stop_after=request.stop_after,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result.blocked_at == "S7" and result.error in PARKED_ERRORS:
         _PENDING.park(result)
     return {"summary": summarise_incident(result), "result": result.to_dict()}
 
 
-@app.get("/pipeline/pending")
+@app.get("/pipeline/pending", dependencies=[Depends(require_token)])
 def list_pending() -> dict[str, Any]:
     return {"pending": _PENDING.all()}
 
 
-@app.post("/pipeline/approve/{decision_id}")
+@app.post("/pipeline/approve/{decision_id}", dependencies=[Depends(require_token)])
 def approve_decision(
     decision_id: str, request: ApprovalRequest | None = None
 ) -> dict[str, Any]:
-    parked = _PENDING.get(decision_id)
+    parked = _PENDING.claim(decision_id)
     if parked is None:
         raise HTTPException(status_code=404, detail="unknown decision_id")
-    pipeline = _pipeline()
-    result = pipeline.resume(
-        parked,
-        approve=True,
-        authorization=request.authorization if request else None,
-    )
-    if result.error != "authorization_required":
-        _PENDING.remove(decision_id)
+    try:
+        result = _pipeline().resume(
+            parked,
+            approve=True,
+            authorization=request.authorization if request else None,
+        )
+    except Exception:
+        _PENDING.restore(decision_id, parked)
+        raise
+    if result.error in {"authorization_required", "authorization_invalid"}:
+        _PENDING.restore(decision_id, parked)
+        raise HTTPException(status_code=403, detail=result.error)
     return {"summary": summarise_incident(result), "result": result.to_dict()}
 
 
-@app.post("/pipeline/cancel/{decision_id}")
+@app.post("/pipeline/cancel/{decision_id}", dependencies=[Depends(require_token)])
 def cancel_decision(decision_id: str) -> dict[str, Any]:
-    parked = _PENDING.get(decision_id)
+    parked = _PENDING.claim(decision_id)
     if parked is None:
         raise HTTPException(status_code=404, detail="unknown decision_id")
     result = _pipeline().resume(parked, approve=False)
-    _PENDING.remove(decision_id)
     return {"summary": summarise_incident(result), "result": result.to_dict()}
 
 
-@app.get("/store/stats")
+@app.get("/store/stats", dependencies=[Depends(require_token)])
 def store_stats() -> dict[str, Any]:
     if _STORE is None:
         raise HTTPException(status_code=503, detail="persistence disabled")
     return _STORE.stats()
 
 
-@app.get("/store/search")
+@app.get("/store/search", dependencies=[Depends(require_token)])
 def store_search(q: str, kind: str | None = None, limit: int = 10) -> dict[str, Any]:
     if _STORE is None:
         raise HTTPException(status_code=503, detail="persistence disabled")
     return _STORE.search(q, kind=kind, limit=limit)
 
 
-@app.get("/store/{kind}/{record_id}")
+@app.get("/store/{kind}/{record_id}", dependencies=[Depends(require_token)])
 def store_get(kind: str, record_id: str) -> dict[str, Any]:
     if _STORE is None:
         raise HTTPException(status_code=503, detail="persistence disabled")

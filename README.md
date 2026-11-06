@@ -20,10 +20,14 @@ assumed, and whose higher-impact actions stop for a human.
 - **Tiered response.** Asset class and hypothesis determine a tier. Tier 0 may
   proceed automatically; higher tiers require an explicit approval inside a
   bounded execution window.
-- **Evidence, not vibes.** A conclusion must clear a minimum-support threshold
-  and triangulate across independent sources before it can drive a response.
-- **Sanitised telemetry.** Hostnames, addresses, and binary blobs are replaced
-  before anything is handed to a model.
+- **Evidence, not vibes.** A conclusion must clear a minimum-support threshold,
+  and a response needs at least three distinct conclusions. Identical replayed
+  events collapse into one fact. Requiring agreement between independent sensors
+  is opt-in through `OVERLORD_MIN_INDEPENDENT_SOURCES`, which defaults to `1`.
+- **Sanitised telemetry.** Addresses, hostnames, URLs, email addresses, usernames
+  in paths, common secrets, and binary blobs are replaced in what the analyst
+  receives. The original fact is kept for forensics. Redaction is pattern-based,
+  so an unlabelled short hostname can still get through.
 - **Append-only trail.** Requests and replies are paired into events; the final
   decision is recorded with its provenance.
 
@@ -87,7 +91,7 @@ Run the pipeline directly:
 ```bash
 curl -s -X POST http://127.0.0.1:8790/pipeline/run \
   -H 'content-type: application/json' \
-  -d '{"source":"sim","telemetry":[{"tag":"authentication","host":"web-01"}]}'
+  -d '{"telemetry":[{"source":"wazuh","message":"login","normalized_tags":["authentication"]}]}'
 ```
 
 Inspect and resume a stopped run:
@@ -95,7 +99,7 @@ Inspect and resume a stopped run:
 ```bash
 curl -s -X POST http://127.0.0.1:8790/pipeline/run \
   -H 'content-type: application/json' \
-  -d '{"source":"sim","stop_after":"S2"}'
+  -d '{"telemetry":[{"source":"wazuh","message":"login"}],"stop_after":"S2"}'
 
 curl -s http://127.0.0.1:8790/pipeline/stages
 ```
@@ -173,6 +177,12 @@ adversary emulation in isolated VMs is a separate layer.
 | GET | `/store/{kind}/{record_id}` | Fetch one record. |
 | POST | `/validate/conclusion` | Validate an agent conclusion against its schema. |
 
+Approval is a separate step: `/pipeline/run` rejects `approve: true` and
+`authorization` unless `OVERLORD_ALLOW_INLINE_APPROVAL=1`. Tier 2 tokens are verified
+against `OVERLORD_TIER2_AUTHORIZERS`, and an unset value means nobody can authorize.
+The approver's name is stored on the decision. Create a digest with
+`printf %s "$TOKEN" | sha256sum`.
+
 ## Record store
 
 Persistence is opt-in (`OVERLORD_PERSIST=1`). The default store is a local
@@ -203,6 +213,12 @@ you run the core elsewhere.
 | `OVERLORD_QDRANT_URL` | `http://127.0.0.1:6350` | Qdrant endpoint when persisting. |
 | `OVERLORD_EMBED_MODEL` | `nomic-embed-text` | Ollama embedding model. |
 | `OVERLORD_INTEL_DB` | unset | Threat-intel SQLite ledger for enrichment. |
+| `OVERLORD_API_TOKEN` | unset | Bearer token for pipeline and store endpoints. **Unset makes them return 503.** n8n workflows read the same variable, so n8n needs it too. |
+| `OVERLORD_ALLOW_UNAUTHENTICATED` | `0` | Set to `1` to run those endpoints without a token, for local development on loopback only. |
+| `OVERLORD_TIER2_AUTHORIZERS` | unset | JSON mapping authorizer name to SHA-256 of their token. |
+| `OVERLORD_ALLOW_INLINE_APPROVAL` | `0` | Set to `1` to allow approval inside `/pipeline/run`. |
+| `OVERLORD_MIN_INDEPENDENT_SOURCES` | `2` | Distinct sensor types needed before a response. |
+| `OVERLORD_ASSET_INVENTORY` | unset | JSON file mapping asset name to class. When set, a target that is missing or declared differently is blocked. |
 
 ## Status
 

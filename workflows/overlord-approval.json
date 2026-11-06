@@ -72,7 +72,16 @@
         "options": {},
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.payload) }}"
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OVERLORD_API_TOKEN }}"
+            }
+          ]
+        }
       },
       "id": "06a28c51-6b7a-5f9e-9a11-2086b418fff6",
       "name": "Resume Decision",

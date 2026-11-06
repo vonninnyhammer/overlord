@@ -104,7 +104,9 @@ def test_tier2_requires_written_authorization():
     assert blocked.blocked_at == "S7"
     assert blocked.error == "authorization_required"
 
-    allowed = OverlordPipeline(clock=SteppingClock()).run_incident(
+    allowed = OverlordPipeline(
+        clock=SteppingClock(), authorizer=lambda token: "clinician"
+    ).run_incident(
         telemetry(3),
         requested_tier=1,
         asset_class="medical_workstation",
@@ -274,7 +276,7 @@ def test_resume_after_window_expiry_fails():
 
 
 def test_resume_tier2_requires_authorization():
-    pipeline = OverlordPipeline(clock=SteppingClock())
+    pipeline = OverlordPipeline(clock=SteppingClock(), authorizer=lambda token: "clinician")
     result = pipeline.run_incident(
         telemetry(3, tag="lateral_move"),
         requested_tier=1,

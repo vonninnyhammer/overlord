@@ -160,6 +160,7 @@ class Decision(BaseModel):
     status: DecisionStatus
     outcome: DecisionOutcome | None = None
     rolled_back_by: str | None = None
+    approved_by: str | None = None
     created_at: datetime
     resolved_at: datetime | None = None
     tokens_used: int = Field(ge=0, default=0)

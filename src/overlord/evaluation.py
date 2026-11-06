@@ -419,6 +419,10 @@ def _clock_for(scenario: Scenario):
 
 def run_scenario(scenario: Scenario) -> ScenarioResult:
     pipeline = OverlordPipeline(
+        authorizer=lambda token: "eval-authorizer" if token else None,
+        # Scenarios replay one sensor to test the later gates; the two-source
+        # requirement itself is covered in tests/test_hardening.py.
+        min_independent_sources=1,
         auto_sensors=scenario.pipeline.auto_sensors,
         clock=_clock_for(scenario),
         model_context_window=scenario.pipeline.model_context_window,

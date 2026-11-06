@@ -7,10 +7,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from pydantic import ValidationError
-
+from .authz import Authorizer, env_authorizer
 from .events import EventStatus, EventType, build_event, pair_requests_and_replies
 from .gates import (
     CompressionResult,
@@ -25,6 +24,7 @@ from .gates import (
 from .intel import IntelEnrichment, IntelLedger
 from .models import (
     MAX_EVIDENCE_SUMMARY_CHARS,
+    MAX_RAW_PAYLOAD_BYTES,
     AuthorisedBy,
     ConclusionSubmission,
     Decision,
@@ -42,6 +42,19 @@ from .sensors import sensor_factory
 from .store import OverlordStore
 
 STAGES: tuple[str, ...] = tuple(f"S{i}" for i in range(1, 10))
+
+# Highest-impact first, so the same facts always give the same hypothesis.
+TAG_PRIORITY: tuple[str, ...] = (
+    "data_exfiltration",
+    "lateral_move",
+    "suspicious_login",
+    "authentication",
+    "privilege_escalation",
+    "registry_modification",
+    "network_connection",
+    "process_creation",
+    "file_access",
+)
 
 TAG_HYPOTHESIS: dict[str, Hypothesis] = {
     "authentication": Hypothesis.CREDENTIAL_ACCESS,
@@ -88,12 +101,52 @@ class Executor(Protocol):
     def execute(self, decision: Decision) -> DecisionOutcome: ...
 
 
+def _sanitize_strings(value: Any) -> Any:
+    if isinstance(value, str):
+        return sanitize_telemetry(value).text
+    if isinstance(value, list):
+        return [_sanitize_strings(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _sanitize_strings(item) for key, item in value.items()}
+    return value
+
+
+def sanitized_view(fact: Fact) -> Fact:
+    """The copy of a fact a model may see. The original stays in the ledger for forensics."""
+    decoded = base64.b64decode(fact.raw_payload).decode("utf-8", "replace")
+    clean = sanitize_telemetry(decoded).text.encode("utf-8")[:MAX_RAW_PAYLOAD_BYTES]
+    provenance = fact.provenance.model_copy(
+        update={
+            "collector_id": sanitize_telemetry(fact.provenance.collector_id).text,
+            "host_id": sanitize_telemetry(fact.provenance.host_id).text,
+            "sensor_uid": sanitize_telemetry(fact.provenance.sensor_uid).text,
+        }
+    )
+    return fact.model_copy(
+        update={"raw_payload": base64.b64encode(clean).decode("ascii"), "provenance": provenance}
+    )
+
+
 class DefaultSensor:
     def normalize(self, raw: Mapping[str, Any], now: datetime) -> Fact:
         text = str(raw.get("message", ""))
         payload = base64.b64encode(text.encode("utf-8", "replace")[:3000]).decode("ascii")
         return Fact(
-            fact_id=raw.get("fact_id") or uuid4(),
+            fact_id=raw.get("fact_id")
+            or uuid5(
+                NAMESPACE_URL,
+                "default:"
+                + json.dumps(
+                    [
+                        raw.get("source"),
+                        raw.get("sensor_uid"),
+                        raw.get("host_id"),
+                        raw.get("timestamp"),
+                        text,
+                    ],
+                    default=str,
+                ),
+            ),
             source=Source(str(raw.get("source", Source.WAZUH.value))),
             timestamp=now,
             raw_payload=payload,
@@ -127,7 +180,8 @@ class DefaultAnalyst:
         facts: Sequence[Fact],
     ) -> ConclusionSubmission:
         tags = [tag for fact in facts for tag in fact.normalized_tags]
-        hypothesis = TAG_HYPOTHESIS.get(tags[0], Hypothesis.DISCOVERY) if tags else Hypothesis.DISCOVERY
+        lead = next((tag for tag in TAG_PRIORITY if tag in tags), None)
+        hypothesis = TAG_HYPOTHESIS.get(lead, Hypothesis.DISCOVERY) if lead else Hypothesis.DISCOVERY
         supporting = sorted({str(fact.fact_id) for fact in facts})
         summary = sanitize_telemetry(
             f"{hypothesis.value} observed across {len(supporting)} correlated facts"
@@ -165,6 +219,7 @@ class IncidentResult:
     events: list[dict[str, Any]] = field(default_factory=list)
     blocked_at: str | None = None
     error: str | None = None
+    audit_errors: list[str] = field(default_factory=list)
 
     @property
     def applied(self) -> bool:
@@ -186,6 +241,7 @@ class IncidentResult:
             "events": self.events,
             "blocked_at": self.blocked_at,
             "error": self.error,
+            "audit_errors": self.audit_errors,
         }
 
 
@@ -203,6 +259,9 @@ class OverlordPipeline:
         max_concurrent_requests: int = 3,
         requesting_agent: str = "hermes",
         store: OverlordStore | None = None,
+        authorizer: Authorizer | None = None,
+        min_independent_sources: int | None = None,
+        asset_inventory: Mapping[str, str] | None = None,
     ) -> None:
         self._default_sensor = DefaultSensor()
         self.sensor = sensor or self._default_sensor
@@ -216,6 +275,15 @@ class OverlordPipeline:
         self.max_concurrent_requests = max_concurrent_requests
         self.requesting_agent = requesting_agent
         self.store = store
+        self.authorizer = authorizer or env_authorizer
+        self.min_independent_sources = (
+            min_independent_sources
+            if min_independent_sources is not None
+            else int(os.environ.get("OVERLORD_MIN_INDEPENDENT_SOURCES", "2"))
+        )
+        self.asset_inventory = (
+            asset_inventory if asset_inventory is not None else self._load_inventory()
+        )
         self._in_flight: dict[str, int] = {}
 
     @staticmethod
@@ -225,13 +293,31 @@ class OverlordPipeline:
             return IntelEnrichment(IntelLedger(intel_db), DefaultEnrichment())
         return DefaultEnrichment()
 
-    def _persist(self, method: str, payload: dict[str, Any]) -> None:
+    @staticmethod
+    def _load_inventory() -> Mapping[str, str] | None:
+        path = os.environ.get("OVERLORD_ASSET_INVENTORY")
+        if not path:
+            return None
+        loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            raise ValueError("OVERLORD_ASSET_INVENTORY must map asset name to asset class")
+        return loaded
+
+    def _persist(
+        self, method: str, payload: dict[str, Any], result: IncidentResult | None = None
+    ) -> bool:
         if self.store is None:
-            return
+            return True
         try:
             getattr(self.store, method)(payload)
-        except Exception:
-            return
+        except Exception as exc:
+            if result is not None:
+                result.audit_errors.append(f"{method}: {type(exc).__name__}")
+            return False
+        return True
+
+    def _release(self, agent: str) -> None:
+        self._in_flight[agent] = max(0, self._in_flight.get(agent, 1) - 1)
 
     def _now(self) -> datetime:
         return self.clock()
@@ -285,15 +371,23 @@ class OverlordPipeline:
         stop_after: str | None = None,
     ) -> IncidentResult:
         result = IncidentResult(incident_id=incident_id or f"inc-{uuid4().hex[:12]}")
-        limit = STAGES.index(stop_after) + 1 if stop_after in STAGES else len(STAGES)
+        # An unknown stop_after must never fall through to execution.
+        if stop_after is not None and stop_after not in STAGES:
+            raise ValueError(f"unknown stop_after {stop_after!r}; expected one of {STAGES}")
+        limit = STAGES.index(stop_after) + 1 if stop_after else len(STAGES)
 
         self._s1_ingest(result, telemetry)
+        if result.blocked_at or limit <= 1:
+            return result
         self._s2_enrichment(result)
         if limit <= 2:
             return result
         for fact_id in sorted(result.facts):
             correlation = self._s3_dispatch(result, fact_id)
-            if result.blocked_at or limit <= 3:
+            if result.blocked_at:
+                return result
+            if limit <= 3:
+                self._release(self.requesting_agent)
                 return result
             self._s4_analysis(result, correlation, fact_id)
             if result.blocked_at or limit <= 4:
@@ -301,7 +395,7 @@ class OverlordPipeline:
         self._s5_justification(result)
         if result.blocked_at or limit <= 5:
             return result
-        self._s6_tier(result, requested_tier, asset_class)
+        self._s6_tier(result, requested_tier, asset_class, target_asset)
         if result.blocked_at or limit <= 6:
             return result
         self._s7_approval(result, target_asset, approve, authorization)
@@ -321,9 +415,21 @@ class OverlordPipeline:
             sensor = self.sensor
             if self.auto_sensors and sensor is self._default_sensor:
                 sensor = sensor_factory(str(raw.get("source", "")))
-            fact = sensor.normalize(raw, now)
+            try:
+                fact = sensor.normalize(raw, now)
+            except Exception as exc:
+                self._emit(
+                    result,
+                    "S1",
+                    "pipeline.stage",
+                    EventStatus.FAILED,
+                    body="invalid_telemetry",
+                    metadata={"error_type": type(exc).__name__},
+                )
+                self._block(result, "S1", "invalid_telemetry")
+                return
             result.facts[str(fact.fact_id)] = fact
-            self._persist("record_fact", fact.model_dump(mode="json"))
+            self._persist("record_fact", fact.model_dump(mode="json"), result)
         self._emit(
             result,
             "S1",
@@ -374,14 +480,37 @@ class OverlordPipeline:
         agent = self.requesting_agent
         try:
             facts = [result.facts[fact_id] for fact_id in sorted(result.facts)]
+            view = [sanitized_view(fact) for fact in facts]
+            enrichment = []
+            for fact in facts:
+                context = dict(result.enrichment[str(fact.fact_id)])
+                intel = context.pop("threat_intel", None)
+                context = _sanitize_strings(context)
+                if intel is not None:
+                    context["threat_intel"] = intel
+                enrichment.append(context)
             request = {
                 "incident_id": result.incident_id,
                 "trigger_fact_id": trigger_fact_id,
-                "facts": [fact.model_dump(mode="json") for fact in facts],
-                "enrichment": [result.enrichment[str(fact.fact_id)] for fact in facts],
+                "facts": [fact.model_dump(mode="json") for fact in view],
+                "enrichment": enrichment,
             }
-            produced = self.analyst.analyse(request, facts)
-            submitted = validate_agent_output(produced.model_dump(mode="json"))
+            try:
+                produced = self.analyst.analyse(request, view)
+                submitted = validate_agent_output(produced.model_dump(mode="json"))
+            except Exception as exc:
+                self._emit(
+                    result,
+                    "S4",
+                    EventType.TASK_REPLY.value,
+                    EventStatus.FAILED,
+                    body="analyst_error",
+                    metadata={"error_type": type(exc).__name__},
+                    correlation_id=correlation,
+                    from_agent=agent,
+                )
+                self._block(result, "S4", "analyst_error")
+                return
 
             sanitized = sanitize_telemetry(submitted.evidence_summary).text
             submission = submitted.model_copy(
@@ -437,7 +566,7 @@ class OverlordPipeline:
                 return
 
             result.conclusions[str(submission.conclusion_id)] = submission
-            self._persist("record_conclusion", submission.model_dump(mode="json"))
+            self._persist("record_conclusion", submission.model_dump(mode="json"), result)
             self._emit(
                 result,
                 "S4",
@@ -453,7 +582,7 @@ class OverlordPipeline:
                 from_agent=agent,
             )
         finally:
-            self._in_flight[agent] = max(0, self._in_flight.get(agent, 1) - 1)
+            self._release(agent)
 
     def _s5_justification(self, result: IncidentResult) -> None:
         justification = sorted(result.conclusions)
@@ -469,6 +598,25 @@ class OverlordPipeline:
             )
             self._block(result, "S5", gate.error or "triangulation_failed")
             return
+        sources = sorted(
+            {
+                result.facts[str(fact_id)].source.value
+                for conclusion in result.conclusions.values()
+                for fact_id in conclusion.supporting_facts
+                if str(fact_id) in result.facts
+            }
+        )
+        if len(sources) < self.min_independent_sources:
+            self._emit(
+                result,
+                "S5",
+                "pipeline.stage",
+                EventStatus.FAILED,
+                body="insufficient_independent_sources",
+                metadata={"sources": sources, "required": self.min_independent_sources},
+            )
+            self._block(result, "S5", "insufficient_independent_sources")
+            return
         self._emit(
             result,
             "S5",
@@ -479,8 +627,24 @@ class OverlordPipeline:
         )
 
     def _s6_tier(
-        self, result: IncidentResult, requested_tier: int, asset_class: str
+        self,
+        result: IncidentResult,
+        requested_tier: int,
+        asset_class: str,
+        target_asset: str,
     ) -> None:
+        if self.asset_inventory is not None:
+            if self.asset_inventory.get(target_asset) != asset_class:
+                self._emit(
+                    result,
+                    "S6",
+                    "pipeline.stage",
+                    EventStatus.FAILED,
+                    body="asset_class_mismatch",
+                    metadata={"declared_asset_class": asset_class},
+                )
+                self._block(result, "S6", "asset_class_mismatch")
+                return
         assignment = assign_tier(requested_tier, asset_class)
         result.tier = assignment
         if not assignment.permitted:
@@ -521,7 +685,7 @@ class OverlordPipeline:
             target_asset=target_asset,
             justification=[UUID(cid) for cid in sorted(result.conclusions)],
             execution_window_seconds=EXECUTION_WINDOW_SECONDS[tier],
-            status=DecisionStatus.APPLIED if tier == Tier.AUTONOMOUS else DecisionStatus.PENDING,
+            status=DecisionStatus.PENDING,
             created_at=self._now(),
         )
 
@@ -561,6 +725,7 @@ class OverlordPipeline:
                 result.blocked_at = "S7"
                 result.error = "cancelled"
                 self._emit(result, "S7", "pipeline.stage", EventStatus.SUPERSEDED, body="cancelled")
+                self._persist("record_decision", decision.model_dump(mode="json"), result)
                 return
             if approve is None:
                 result.decision = decision
@@ -578,6 +743,7 @@ class OverlordPipeline:
                 result.decision = decision
                 result.outcome = DecisionOutcome.ESCALATED
                 self._block(result, "S7", "window_expired")
+                self._persist("record_decision", decision.model_dump(mode="json"), result)
                 return
             result.decision = decision
             self._emit(result, "S7", "pipeline.stage", EventStatus.APPLIED, body="tier1 approved")
@@ -587,9 +753,12 @@ class OverlordPipeline:
             result.decision = decision
             self._block(result, "S7", "authorization_required")
             return
-        decision = decision.model_copy(
-            update={"status": DecisionStatus.APPLIED, "created_at": self._now()}
-        )
+        approver = self.authorizer(authorization)
+        if approver is None:
+            result.decision = decision
+            self._block(result, "S7", "authorization_invalid")
+            return
+        decision = decision.model_copy(update={"approved_by": approver, "created_at": self._now()})
         result.decision = decision
         self._emit(
             result,
@@ -636,6 +805,7 @@ class OverlordPipeline:
             result.blocked_at = "S7"
             result.error = "cancelled"
             self._emit(result, "S7", "pipeline.stage", EventStatus.SUPERSEDED, body="cancelled")
+            self._persist("record_decision", decision.model_dump(mode="json"), result)
             return result
 
         if tier == Tier.HUMAN and not authorization:
@@ -649,6 +819,22 @@ class OverlordPipeline:
                 body="authorization_required",
             )
             return result
+
+        if tier == Tier.HUMAN:
+            approver = self.authorizer(authorization or "")
+            if approver is None:
+                result.blocked_at = "S7"
+                result.error = "authorization_invalid"
+                self._emit(
+                    result,
+                    "S7",
+                    "pipeline.stage",
+                    EventStatus.BLOCKED,
+                    body="authorization_invalid",
+                )
+                return result
+            decision = decision.model_copy(update={"approved_by": approver})
+            result.decision = decision
 
         if tier == Tier.CANCELLABLE:
             elapsed = (self._now() - decision.created_at).total_seconds()
@@ -671,6 +857,7 @@ class OverlordPipeline:
                     EventStatus.FAILED,
                     body="window_expired",
                 )
+                self._persist("record_decision", decision.model_dump(mode="json"), result)
                 return result
 
         self._emit(result, "S7", "pipeline.stage", EventStatus.APPLIED, body="resumed approval")
@@ -681,10 +868,11 @@ class OverlordPipeline:
     def _s8_execute(self, result: IncidentResult) -> None:
         assert result.decision is not None
         decision = result.decision
-        if decision.action_tier == Tier.AUTONOMOUS:
-            outcome = DecisionOutcome.SUCCESS
-        else:
+        try:
             outcome = self.executor.execute(decision)
+        except Exception as exc:
+            result.audit_errors.append(f"executor: {type(exc).__name__}")
+            outcome = DecisionOutcome.ESCALATED
         result.outcome = outcome
         status = (
             DecisionStatus.APPLIED
@@ -707,7 +895,17 @@ class OverlordPipeline:
 
     def _s9_record(self, result: IncidentResult) -> None:
         assert result.decision is not None
-        self._persist("record_decision", result.decision.model_dump(mode="json"))
+        if not self._persist("record_decision", result.decision.model_dump(mode="json"), result):
+            result.error = "ledger_write_failed"
+            self._emit(
+                result,
+                "S9",
+                "pipeline.stage",
+                EventStatus.FAILED,
+                body=f"decision {result.decision.decision_id} NOT recorded",
+                metadata={"decision_id": str(result.decision.decision_id)},
+            )
+            return
         self._emit(
             result,
             "S9",

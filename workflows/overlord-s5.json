@@ -25,7 +25,16 @@
         "options": {},
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify(Object.assign({}, $json.body, { stop_after: \"S5\" })) }}"
+        "jsonBody": "={{ JSON.stringify(Object.assign({}, $json.body, { stop_after: \"S5\" })) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OVERLORD_API_TOKEN }}"
+            }
+          ]
+        }
       },
       "id": "8fe96ffc-b129-5593-9a80-945d1413f65b",
       "name": "Run Overlord Core",

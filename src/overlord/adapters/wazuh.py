@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Mapping
 from uuid import NAMESPACE_URL, uuid5
@@ -30,7 +31,7 @@ def encode_payload(raw: Mapping[str, Any]) -> str:
 def parse_timestamp(value: Any, default: datetime) -> datetime:
     if not isinstance(value, str) or not value.strip():
         return default
-    text = value.strip().replace("Z", "+00:00")
+    text = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", value.strip().replace("Z", "+00:00"))
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
@@ -52,13 +53,14 @@ class WazuhAdapter:
         agent = raw.get("agent") or {}
         rule = raw.get("rule") or {}
         rule_id = str(rule.get("id", ""))
-        alert_id = str(raw.get("id") or f"{rule_id}:{raw.get('@timestamp', '')}")
-        level = coerce_int(raw.get("level"), 5)
+        stamp = raw.get("@timestamp") or raw.get("timestamp")
+        alert_id = str(raw.get("id") or f"{rule_id}:{stamp or ''}")
+        level = coerce_int(rule.get("level", raw.get("level")), 5)
         tags = RULE_TAGS.get(rule_id, DEFAULT_TAGS)
         return Fact(
             fact_id=uuid5(NAMESPACE_URL, f"wazuh:{alert_id}"),
             source=Source.WAZUH,
-            timestamp=parse_timestamp(raw.get("@timestamp"), now),
+            timestamp=parse_timestamp(stamp, now),
             raw_payload=encode_payload(raw),
             normalized_tags=tags,
             confidence=min(1.0, max(0.1, level / 15)),
