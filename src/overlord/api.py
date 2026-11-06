@@ -62,7 +62,8 @@ def _build_store() -> OverlordStore | None:
 
 
 _STORE = _build_store()
-_RUNTIME = RuntimeState()  # throttle and circuit breaker shared by all requests
+# Throttle and circuit breaker shared by all requests; the breaker survives restarts.
+_RUNTIME = RuntimeState(path=_STATE_DIR / "runtime.json")
 
 
 def _pipeline() -> OverlordPipeline:

@@ -87,7 +87,7 @@ class Fact(BaseModel):
 
     fact_id: UUID
     source: Source
-    timestamp: datetime
+    timestamp: datetime  # when the event happened, as the sensor reported it
     raw_payload: str
     normalized_tags: list[str] = Field(min_length=1, max_length=3)
     confidence: float = Field(ge=0.0, le=1.0)
@@ -95,6 +95,7 @@ class Fact(BaseModel):
     expires_at: datetime | None = None
     created_by: str
     tokens_used: int = Field(ge=0, default=0)
+    received_at: datetime | None = None  # when Overlord ingested it; set by S1
 
     @field_validator("raw_payload")
     @classmethod

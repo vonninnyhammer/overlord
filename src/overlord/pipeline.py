@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
+from .adapters.wazuh import parse_timestamp
 from .authz import Authorizer, env_authorizer
 from .events import EventStatus, EventType, build_event, pair_requests_and_replies
 from .gates import (
@@ -44,6 +45,8 @@ from .store import OverlordStore
 
 STAGES: tuple[str, ...] = tuple(f"S{i}" for i in range(1, 10))
 GENERIC_MAX_CONFIDENCE = 0.9
+# An event dated further ahead than this is treated as a bad clock and given its arrival time.
+MAX_FUTURE_SKEW_SECONDS = 300
 
 # Highest-impact first, so the same facts always give the same hypothesis.
 TAG_PRIORITY: tuple[str, ...] = (
@@ -151,7 +154,7 @@ class DefaultSensor:
                 ),
             ),
             source=Source(str(raw.get("source", Source.WAZUH.value))),
-            timestamp=now,
+            timestamp=parse_timestamp(raw.get("@timestamp") or raw.get("timestamp"), now),
             raw_payload=payload,
             normalized_tags=list(raw.get("normalized_tags") or ["process_creation"]),
             confidence=min(GENERIC_MAX_CONFIDENCE, float(raw.get("confidence", GENERIC_MAX_CONFIDENCE))),
@@ -416,6 +419,7 @@ class OverlordPipeline:
         self, result: IncidentResult, telemetry: Sequence[Mapping[str, Any]]
     ) -> None:
         now = self._now()
+        clamped = 0
         for raw in telemetry:
             sensor = self.sensor
             if self.auto_sensors and sensor is self._default_sensor:
@@ -433,6 +437,11 @@ class OverlordPipeline:
                 )
                 self._block(result, "S1", "invalid_telemetry")
                 return
+            stamp = fact.timestamp
+            if (stamp - now).total_seconds() > MAX_FUTURE_SKEW_SECONDS:
+                stamp = now
+                clamped += 1
+            fact = fact.model_copy(update={"timestamp": stamp, "received_at": now})
             result.facts[str(fact.fact_id)] = fact
             self._persist("record_fact", fact.model_dump(mode="json"), result)
         self._emit(
@@ -441,7 +450,7 @@ class OverlordPipeline:
             "pipeline.stage",
             EventStatus.READY,
             body=f"ingested {len(result.facts)} facts",
-            metadata={"fact_ids": sorted(result.facts)},
+            metadata={"fact_ids": sorted(result.facts), "future_timestamps_clamped": clamped},
         )
 
     def _s2_enrichment(self, result: IncidentResult) -> None:

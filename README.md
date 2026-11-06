@@ -37,7 +37,9 @@ assumed, and whose higher-impact actions stop for a human.
   all API requests. After five Tier 1 actions inside five minutes, Tier 1 is
   frozen for fifteen minutes: new Tier 1 requests are raised to Tier 2 where the
   asset allows it and refused where it doesn't, and parked Tier 1 approvals
-  return 409. The counters live in memory, so a restart resets them.
+  return 409. The breaker (recent Tier 1 runs and any freeze) is saved to
+  `runtime.json` in the state folder, so a restart does not lift a freeze; the
+  throttle counts only requests open in the running process.
 - **Append-only trail.** Requests and replies are paired into events; the final
   decision is recorded with its provenance.
 
@@ -63,6 +65,11 @@ window audit, tier assignment, and evidence compression.
 The generic sensor (used unless `auto_sensors` is on) takes tags from the caller,
 but derives the fact id from the event itself, caps confidence at 0.9, and sets
 the author; a caller cannot use made-up ids to make one event count several times.
+
+Every fact keeps two times: `timestamp` is when the event happened (from the
+sensor's own field, ISO 8601 or Unix seconds, falling back to arrival time) and
+`received_at` is when Overlord ingested it. An event dated more than five minutes
+in the future is treated as a bad clock and given its arrival time.
 
 Three adapters normalise vendor events into the same `Fact` shape: `wazuh`,
 `falco`, and `zeek`. Each produces a deterministic UUID derived from the source

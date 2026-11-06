@@ -183,3 +183,69 @@ def test_generic_sensor_ignores_caller_fact_id_and_caps_confidence():
     assert len(r.facts) == 1  # three replays with made-up ids still collapse to one fact
     fact = next(iter(r.facts.values()))
     assert fact.confidence == 0.9 and fact.created_by == "s1_ingest"
+
+
+# --- persistent circuit breaker, event time
+
+def test_freeze_survives_restart(tmp_path):
+    path = tmp_path / "runtime.json"
+    now = datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
+    first = RuntimeState(path=path)
+    for i in range(5):
+        first.record_tier1_run(now + timedelta(seconds=i))
+    assert first.tier1_frozen(now + timedelta(seconds=10))
+    again = RuntimeState(path=path)  # a restart
+    assert again.tier1_frozen(now + timedelta(seconds=10))
+    assert not again.tier1_frozen(now + timedelta(seconds=1000))
+
+
+def test_recent_runs_survive_restart(tmp_path):
+    path = tmp_path / "runtime.json"
+    now = datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
+    a = RuntimeState(path=path)
+    for i in range(4):
+        a.record_tier1_run(now + timedelta(seconds=i))
+    b = RuntimeState(path=path)
+    assert b.record_tier1_run(now + timedelta(seconds=5))  # the fifth trips it, across the restart
+
+
+def test_corrupt_runtime_file_is_kept_aside(tmp_path):
+    path = tmp_path / "runtime.json"
+    path.write_text("{not json")
+    state = RuntimeState(path=path)
+    assert not state.tier1_frozen(datetime.now(timezone.utc))
+    assert list(tmp_path.glob("runtime.json.corrupt-*"))
+
+
+def test_throttle_is_not_persisted(tmp_path):
+    path = tmp_path / "runtime.json"
+    a = RuntimeState(path=path)
+    a.acquire("hermes", 3)
+    a.record_tier1_run(datetime.now(timezone.utc))
+    assert RuntimeState(path=path).in_flight("hermes") == 0
+
+
+def test_generic_sensor_keeps_event_time_and_arrival_time():
+    now = datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
+    tel = [{"message": "evt", "source": "wazuh", "normalized_tags": ["authentication"],
+            "timestamp": "2026-11-06T11:15:00Z"},
+           {"message": "evt2", "source": "wazuh", "normalized_tags": ["authentication"], "timestamp": 1793963700}]
+    r = OverlordPipeline(clock=lambda: now).run_incident(tel, stop_after="S1")
+    stamps = sorted(f.timestamp for f in r.facts.values())
+    assert stamps[0] == datetime(2026, 11, 6, 11, 15, tzinfo=timezone.utc)
+    assert all(f.received_at == now for f in r.facts.values())
+
+
+def test_future_event_time_is_clamped():
+    now = datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
+    tel = [{"message": "evt", "source": "wazuh", "normalized_tags": ["authentication"],
+            "timestamp": "2027-01-01T00:00:00Z"}]
+    r = OverlordPipeline(clock=lambda: now).run_incident(tel, stop_after="S1")
+    assert next(iter(r.facts.values())).timestamp == now
+    assert r.events[-1]["metadata"]["future_timestamps_clamped"] == 1
+
+
+def test_missing_event_time_falls_back_to_arrival():
+    now = datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
+    r = OverlordPipeline(clock=lambda: now).run_incident(events(1), stop_after="S1")
+    assert next(iter(r.facts.values())).timestamp == now

@@ -29,6 +29,12 @@ def encode_payload(raw: Mapping[str, Any]) -> str:
 
 
 def parse_timestamp(value: Any, default: datetime) -> datetime:
+    """ISO 8601 text or Unix seconds to an aware UTC time; anything else gives default."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return default
     if not isinstance(value, str) or not value.strip():
         return default
     text = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", value.strip().replace("Z", "+00:00"))
