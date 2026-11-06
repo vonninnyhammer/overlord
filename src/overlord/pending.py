@@ -45,6 +45,7 @@ class PendingStore:
             self._items[decision_id] = {
                 "incident_id": result.incident_id,
                 "decision": result.decision.model_dump(mode="json"),
+                "asset_class": result.tier.asset_class if result.tier else None,
                 "events": result.events,
             }
             self._save()
@@ -64,7 +65,8 @@ class PendingStore:
             self._save()
 
     def get(self, decision_id: str) -> dict[str, Any] | None:
-        return self._items.get(decision_id)
+        with self._lock:
+            return self._items.get(decision_id)
 
     def remove(self, decision_id: str) -> None:
         with self._lock:
@@ -72,7 +74,8 @@ class PendingStore:
                 self._save()
 
     def all(self) -> list[dict[str, Any]]:
-        return [
-            {"decision_id": decision_id, **item}
-            for decision_id, item in sorted(self._items.items())
-        ]
+        with self._lock:
+            return [
+                {"decision_id": decision_id, **item}
+                for decision_id, item in sorted(self._items.items())
+            ]

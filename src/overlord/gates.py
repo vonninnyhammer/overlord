@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -11,6 +11,7 @@ from .policy import (
     ASSET_CLASS_POLICY,
     DEFAULT_MIN_SUPPORT,
     EXECUTION_WINDOW_SECONDS,
+    HYPOTHESIS_MIN_TIER,
     MIN_SUPPORT_DEFAULTS,
     PROTECTED_ASSET_CLASSES,
     Tier,
@@ -237,8 +238,14 @@ def assign_tier(
     requested_tier: int,
     asset_class: str,
     tier0_action_permitted: bool = True,
+    hypothesis: str | None = None,
 ) -> TierAssignment:
     requested = int(requested_tier)
+    floor = HYPOTHESIS_MIN_TIER.get(str(getattr(hypothesis, "value", hypothesis)), 0) if hypothesis else 0
+    if requested in EXECUTION_WINDOW_SECONDS and requested < floor:
+        raised = assign_tier(floor, asset_class, tier0_action_permitted)
+        return replace(raised, requested_tier=requested,
+                       reason=f"raised_to_tier{floor}_for_{getattr(hypothesis, 'value', hypothesis)}:{raised.reason}")
     policy = ASSET_CLASS_POLICY.get(asset_class)
     if policy is None:
         return _assignment(requested, requested, asset_class, False, "unknown_asset_class")

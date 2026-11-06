@@ -24,7 +24,7 @@ from .pipeline import STAGES, OverlordPipeline, summarise_incident
 from .sanitize import sanitize_telemetry
 from .store import OllamaEmbedder, OverlordStore, QdrantIndex
 
-app = FastAPI(title="Overlord Deterministic Core", version="0.2.0")
+app = FastAPI(title="Overlord Deterministic Core", version="0.5.0")
 
 _STATE_DIR = Path(
     os.getenv("OVERLORD_STATE_DIR", str(Path.home() / ".local" / "state" / "overlord"))
@@ -67,6 +67,21 @@ def _pipeline() -> OverlordPipeline:
     return OverlordPipeline(store=_STORE)
 
 
+def _sweep_expired() -> list[str]:
+    """Close Tier 1 decisions nobody approved in time, so the queue only shows live ones."""
+    pipeline = _pipeline()
+    expired = []
+    for item in _PENDING.all():
+        if pipeline.window_expired(item):
+            parked = _PENDING.claim(item["decision_id"])
+            if parked is not None:
+                pipeline.expire(parked)
+                expired.append(item["decision_id"])
+    if expired:
+        log.info("expired %d unapproved Tier 1 decision(s)", len(expired))
+    return expired
+
+
 class SanitizeRequest(BaseModel):
     text: str
 
@@ -92,6 +107,7 @@ class TierRequest(BaseModel):
     requested_tier: int
     asset_class: str
     tier0_action_permitted: bool = True
+    hypothesis: str | None = None
 
 
 class CompressionRequest(BaseModel):
@@ -174,6 +190,7 @@ def post_tier(request: TierRequest) -> dict[str, Any]:
             request.requested_tier,
             request.asset_class,
             request.tier0_action_permitted,
+            request.hypothesis,
         )
     )
 
@@ -228,7 +245,8 @@ def post_pipeline(request: PipelineRequest) -> dict[str, Any]:
 
 @app.get("/pipeline/pending", dependencies=[Depends(require_token)])
 def list_pending() -> dict[str, Any]:
-    return {"pending": _PENDING.all()}
+    expired = _sweep_expired()
+    return {"pending": _PENDING.all(), "expired": expired}
 
 
 @app.post("/pipeline/approve/{decision_id}", dependencies=[Depends(require_token)])
@@ -258,7 +276,11 @@ def cancel_decision(decision_id: str) -> dict[str, Any]:
     parked = _PENDING.claim(decision_id)
     if parked is None:
         raise HTTPException(status_code=404, detail="unknown decision_id")
-    result = _pipeline().resume(parked, approve=False)
+    try:
+        result = _pipeline().resume(parked, approve=False)
+    except Exception:
+        _PENDING.restore(decision_id, parked)
+        raise
     return {"summary": summarise_incident(result), "result": result.to_dict()}
 
 

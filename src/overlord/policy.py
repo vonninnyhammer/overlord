@@ -18,6 +18,22 @@ MIN_SUPPORT_DEFAULTS: dict[str, int] = {
 }
 DEFAULT_MIN_SUPPORT = 3
 
+# The lowest tier a hypothesis may run at. A caller can ask for a higher tier, never a lower one,
+# so an attack on credentials, persistence or data always waits for at least a Tier 1 approval.
+HYPOTHESIS_MIN_TIER: dict[str, int] = {
+    "initial_access": 1,
+    "credential_theft": 1,
+    "credential_access": 1,
+    "lateral_movement": 1,
+    "persistence": 1,
+    "defense_evasion": 1,
+    "exfiltration": 1,
+    "impact": 1,
+    "discovery": 0,
+    "collection": 0,
+    "command_and_control": 0,
+}
+
 
 class Tier(IntEnum):
     AUTONOMOUS = 0

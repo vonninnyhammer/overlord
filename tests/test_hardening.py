@@ -147,8 +147,9 @@ def test_stop_after_stops_at_that_stage_without_acting(stage, last):
 
 def test_tier0_really_calls_the_executor():
     executor = Recorder()
+    # Command-and-control may run at Tier 0; credential attacks are raised to Tier 1.
     result = OverlordPipeline(executor=executor).run_incident(
-        events(), requested_tier=0, asset_class="production_server"
+        events(tag="network_connection"), requested_tier=0, asset_class="production_server"
     )
     assert executor.calls == 1
     assert result.applied

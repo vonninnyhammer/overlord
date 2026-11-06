@@ -17,13 +17,17 @@ assumed, and whose higher-impact actions stop for a human.
 - **Audited context.** `audit_window` computes `usable_context = allowed -
   reserved`, then `remaining = usable_context - evidence_tokens`, and fails when
   `remaining < 0`. Token cost is not double-subtracted.
-- **Tiered response.** Asset class and hypothesis determine a tier. Tier 0 may
-  proceed automatically; higher tiers require an explicit approval inside a
-  bounded execution window.
+- **Tiered response.** The caller requests a tier; the hypothesis sets a floor
+  (`HYPOTHESIS_MIN_TIER`: credential, persistence, lateral-movement, evasion,
+  exfiltration and impact hypotheses are at least Tier 1), and the asset class
+  decides what is allowed. Tier 0 may proceed automatically. Tier 1 needs an
+  approval within 60 seconds; unapproved ones are expired and recorded the next
+  time the queue is read. Tier 2 needs a named authorizer.
 - **Evidence, not vibes.** A conclusion must clear a minimum-support threshold,
   and a response needs at least three distinct conclusions. Identical replayed
-  events collapse into one fact. Requiring agreement between independent sensors
-  is opt-in through `OVERLORD_MIN_INDEPENDENT_SOURCES`, which defaults to `1`.
+  events collapse into one fact. By default a response also needs facts from two
+  different sensor types (`OVERLORD_MIN_INDEPENDENT_SOURCES`, default `2`; set `1`
+  to allow a single sensor).
 - **Sanitised telemetry.** Addresses, hostnames, URLs, email addresses, usernames
   in paths, common secrets, and binary blobs are replaced in what the analyst
   receives. The original fact is kept for forensics. Redaction is pattern-based,

@@ -36,7 +36,7 @@ from .models import (
     Source,
     validate_agent_output,
 )
-from .policy import EXECUTION_WINDOW_SECONDS, Tier
+from .policy import EXECUTION_WINDOW_SECONDS, HYPOTHESIS_MIN_TIER, Tier
 from .sanitize import sanitize_telemetry
 from .sensors import sensor_factory
 from .store import OverlordStore
@@ -645,7 +645,9 @@ class OverlordPipeline:
                 )
                 self._block(result, "S6", "asset_class_mismatch")
                 return
-        assignment = assign_tier(requested_tier, asset_class)
+        hypotheses = sorted({c.hypothesis.value for c in result.conclusions.values()})
+        strictest = max(hypotheses, key=lambda h: (HYPOTHESIS_MIN_TIER.get(h, 0), h), default=None)
+        assignment = assign_tier(requested_tier, asset_class, hypothesis=strictest)
         result.tier = assignment
         if not assignment.permitted:
             self._emit(
@@ -784,7 +786,7 @@ class OverlordPipeline:
         result.tier = TierAssignment(
             requested_tier=tier,
             resolved_tier=tier,
-            asset_class=decision.target_asset,
+            asset_class=str(parked.get("asset_class") or "unknown"),
             permitted=True,
             execution_window_seconds=decision.execution_window_seconds,
             requires_cancel_window=tier == Tier.CANCELLABLE,
@@ -836,33 +838,45 @@ class OverlordPipeline:
             decision = decision.model_copy(update={"approved_by": approver})
             result.decision = decision
 
-        if tier == Tier.CANCELLABLE:
-            elapsed = (self._now() - decision.created_at).total_seconds()
-            if elapsed > float(EXECUTION_WINDOW_SECONDS[Tier.CANCELLABLE]):
-                decision = decision.model_copy(
-                    update={
-                        "status": DecisionStatus.FAILED,
-                        "outcome": DecisionOutcome.ESCALATED,
-                        "resolved_at": self._now(),
-                    }
-                )
-                result.decision = decision
-                result.outcome = DecisionOutcome.ESCALATED
-                result.blocked_at = "S7"
-                result.error = "window_expired"
-                self._emit(
-                    result,
-                    "S7",
-                    "pipeline.stage",
-                    EventStatus.FAILED,
-                    body="window_expired",
-                )
-                self._persist("record_decision", decision.model_dump(mode="json"), result)
-                return result
+        if tier == Tier.CANCELLABLE and self.window_expired(parked):
+            return self._expire(result)
 
         self._emit(result, "S7", "pipeline.stage", EventStatus.APPLIED, body="resumed approval")
         self._s8_execute(result)
         self._s9_record(result)
+        return result
+
+    def window_expired(self, parked: Mapping[str, Any]) -> bool:
+        """True when a parked Tier 1 decision is past its approval window."""
+        decision = parked["decision"]
+        if int(decision.get("action_tier", -1)) != Tier.CANCELLABLE:
+            return False
+        created = datetime.fromisoformat(str(decision["created_at"]).replace("Z", "+00:00"))
+        return (self._now() - created).total_seconds() > float(EXECUTION_WINDOW_SECONDS[Tier.CANCELLABLE])
+
+    def expire(self, parked: Mapping[str, Any]) -> IncidentResult:
+        """Close a parked Tier 1 decision whose window ran out, and record that it never ran."""
+        result = IncidentResult(
+            incident_id=str(parked["incident_id"]),
+            events=list(parked.get("events") or []),
+        )
+        result.decision = Decision.model_validate(parked["decision"])
+        return self._expire(result)
+
+    def _expire(self, result: IncidentResult) -> IncidentResult:
+        assert result.decision is not None
+        result.decision = result.decision.model_copy(
+            update={
+                "status": DecisionStatus.FAILED,
+                "outcome": DecisionOutcome.ESCALATED,
+                "resolved_at": self._now(),
+            }
+        )
+        result.outcome = DecisionOutcome.ESCALATED
+        result.blocked_at = "S7"
+        result.error = "window_expired"
+        self._emit(result, "S7", "pipeline.stage", EventStatus.FAILED, body="window_expired")
+        self._persist("record_decision", result.decision.model_dump(mode="json"), result)
         return result
 
     def _s8_execute(self, result: IncidentResult) -> None:
