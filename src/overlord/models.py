@@ -32,6 +32,7 @@ class Source(str, Enum):
     VELOCIRAPTOR = "velociraptor"
     ZEEK = "zeek"
     SURICATA = "suricata"
+    JOURNALD = "journald"
     HUMAN = "human"
 
 

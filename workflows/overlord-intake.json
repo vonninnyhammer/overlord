@@ -1,0 +1,200 @@
+{
+  "name": "Overlord \u2014 Telemetry Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "overlord/intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d504543a-c247-5bde-a0e9-54e831c296e9",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "25add757-1f16-559d-9076-42705bc8917d"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = $json.body || {};\nconst host = String(body.host || '').toLowerCase();\nif (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(host)) {\n  return [{ json: { error: 'invalid_host' } }];\n}\nconst TAGS = new Set(['authentication', 'suspicious_login', 'privilege_escalation']);\nconst events = Array.isArray(body.events) ? body.events.slice(0, 200) : [];\nconst telemetry = [];\nfor (const e of events) {\n  if (!e || typeof e !== 'object') continue;\n  const tags = (Array.isArray(e.normalized_tags) ? e.normalized_tags : []).filter(t => TAGS.has(t));\n  if (!tags.length) continue;\n  const conf = Number(e.confidence);\n  telemetry.push({\n    source: 'journald',\n    message: String(e.message || '').slice(0, 2000),\n    timestamp: e.timestamp ? String(e.timestamp) : undefined,\n    normalized_tags: tags,\n    confidence: Number.isFinite(conf) ? Math.min(Math.max(conf, 0), 0.9) : 0.5,\n    host_id: host,\n    sensor_uid: 'journald:' + host,\n    collector_id: 'journal-shipper',\n  });\n}\nif (!telemetry.length) {\n  return [{ json: { error: 'no_events' } }];\n}\n// Tier 0 requested: the hypothesis floor raises it where the policy says so.\nreturn [{ json: { error: '', payload: {\n  telemetry, requested_tier: 0, target_asset: host, auto_sensors: false,\n} } }];"
+      },
+      "id": "d4853536-7de2-50dc-ac11-1f6695b60c35",
+      "name": "Validate Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "54439fd2-fcc8-5e17-81de-f80bcd130834",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e39f71d1-10c3-5d60-95bf-0f64c19664ca",
+      "name": "Rejected",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8790/pipeline/run",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OVERLORD_API_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "60ea84f1-9591-5e57-bf3a-7d0eabaeef36",
+      "name": "Run Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const s = $json.summary || {};\nreturn [{ json: { ok: true, summary: s } }];"
+      },
+      "id": "2ac32410-32bc-538f-9e4f-0e413d3f2056",
+      "name": "Summarise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "56a0ba6b-6f24-5f53-a1b1-49adb31ae03a",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Batch": {
+      "main": [
+        [
+          {
+            "node": "Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Pipeline": {
+      "main": [
+        [
+          {
+            "node": "Summarise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarise": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rejected": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Run Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

@@ -1,0 +1,14 @@
+# systemd user unit for tools/journal_shipper.py.
+# Install:  cp tools/overlord-shipper.service ~/.config/systemd/user/
+#           systemctl --user daemon-reload && systemctl --user enable --now overlord-shipper
+[Unit]
+Description=Ship sshd/sudo/su auth events to Overlord's n8n intake
+After=default.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/projects/overlord/tools/journal_shipper.py
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

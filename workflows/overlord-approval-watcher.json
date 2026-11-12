@@ -1,0 +1,133 @@
+{
+  "name": "Overlord \u2014 Approval Watcher",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "16158df0-80a6-56c8-8ebf-d1d5e13cc171",
+      "name": "Every 10 Seconds",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8790/pipeline/pending",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OVERLORD_API_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "e7b5a175-59b6-5694-a8c7-e6d5381eea38",
+      "name": "Read Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const state = $getWorkflowStaticData('global');\nconst seen = state.seen || {};\nconst now = Date.now();\nconst res = $input.first().json || {};\nconst out = [];\n\n// Overlord unreachable: alert once on the transition, not every 10 seconds.\nif (!Array.isArray(res.pending)) {\n  if (!state.down) {\n    state.down = true;\n    out.push({ json: { title: 'Overlord unreachable', priority: 4, tags: ['warning'],\n      message: 'The approval watcher cannot read /pipeline/pending. Pending approvals will not be announced.' } });\n  }\n  return out;\n}\nif (state.down) {\n  state.down = false;\n  out.push({ json: { title: 'Overlord reachable again', priority: 3, tags: ['white_check_mark'],\n    message: 'The approval watcher can read the queue again.' } });\n}\n\nfor (const item of res.pending) {\n  const id = String(item.decision_id || '');\n  if (!id || seen[id]) continue;\n  seen[id] = now;\n  const d = item.decision || {};\n  const win = d.execution_window_seconds;\n  out.push({ json: {\n    title: `Overlord: Tier ${d.action_tier} approval needed`,\n    priority: d.action_tier === 1 ? 5 : 4,\n    tags: ['rotating_light'],\n    message: [\n      `Asset: ${d.target_asset} (${item.asset_class || 'unknown class'})`,\n      win ? `Expires ${win}s after ${d.created_at}` : 'No time limit (Tier 2 needs an authorizer)',\n      `Decision: ${id}`,\n      'Decide on the laptop: tools/decide.py approve|cancel <decision>',\n    ].join('\\n'),\n  } });\n}\nfor (const id of (res.expired || [])) {\n  out.push({ json: { title: 'Overlord: approval expired', priority: 3, tags: ['hourglass'],\n    message: `Decision ${id} was not approved in time; it was expired and recorded.` } });\n}\nfor (const [id, t] of Object.entries(seen)) {\n  if (now - t > 86400000) delete seen[id];\n}\nstate.seen = seen;\nreturn out;"
+      },
+      "id": "739fb4e1-0b9c-564c-a782-45b889616347",
+      "name": "New Notices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OVERLORD_NTFY_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ topic: $env.OVERLORD_NTFY_TOPIC, title: $json.title, message: $json.message, priority: $json.priority, tags: $json.tags }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "689a555c-c280-5a25-914e-c8246c999a26",
+      "name": "Send ntfy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every 10 Seconds": {
+      "main": [
+        [
+          {
+            "node": "Read Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Queue": {
+      "main": [
+        [
+          {
+            "node": "New Notices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Notices": {
+      "main": [
+        [
+          {
+            "node": "Send ntfy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

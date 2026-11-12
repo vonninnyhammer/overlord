@@ -1,0 +1,84 @@
+{
+  "name": "Overlord \u2014 Error Alerts",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "009d8f0e-543b-5f50-bcaa-b054eb46b46a",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const state = $getWorkflowStaticData('global');\nconst last = state.last || {};\nconst now = Date.now();\nconst wf = ($json.workflow && $json.workflow.name) || 'unknown workflow';\nconst ex = $json.execution || {};\nconst err = (ex.error && ex.error.message) || 'unknown error';\n// At most one alert per workflow every 5 minutes.\nif (last[wf] && now - last[wf] < 300000) return [];\nlast[wf] = now;\nstate.last = last;\nreturn [{ json: {\n  title: `n8n failure: ${wf}`,\n  priority: 4,\n  tags: ['x'],\n  message: [`Node: ${ex.lastNodeExecuted || 'unknown'}`, `Error: ${String(err).slice(0, 300)}`,\n            ex.id ? `Execution: ${ex.id}` : ''].filter(Boolean).join('\\n'),\n} }];"
+      },
+      "id": "bad9b7fb-0065-5998-b7a4-127423b4ada5",
+      "name": "Format Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OVERLORD_NTFY_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ topic: $env.OVERLORD_NTFY_TOPIC, title: $json.title, message: $json.message, priority: $json.priority, tags: $json.tags }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "d60a42d1-c4bb-5385-8b6a-77e34dc4c00b",
+      "name": "Send ntfy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Alert": {
+      "main": [
+        [
+          {
+            "node": "Send ntfy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
